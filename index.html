@@ -215,6 +215,75 @@ button{max-width:100%}
 .modal-card{overflow-y:auto!important;overscroll-behavior-y:contain!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important}
 .touch-content input,.touch-content textarea,.touch-content select{touch-action:manipulation}
 
+
+
+/* ===== 小屏幕真正可滚动修复：恢复固定视口，避免内容被外框裁切 ===== */
+.touch-screen{position:relative!important;overflow:hidden!important;touch-action:pan-y!important}
+.touch-screen>.touch-app{
+  position:absolute!important;
+  inset:0!important;
+  width:auto!important;
+  height:auto!important;
+  min-width:0!important;
+  min-height:0!important;
+  display:grid!important;
+  grid-template-rows:36px minmax(0,1fr)!important;
+  overflow:hidden!important;
+  z-index:1!important;
+}
+.touch-screen .touch-head{
+  position:relative!important;
+  min-width:0!important;
+  min-height:0!important;
+  overflow:hidden!important;
+}
+.touch-screen .touch-content{
+  position:relative!important;
+  align-self:stretch!important;
+  width:auto!important;
+  height:auto!important;
+  min-width:0!important;
+  min-height:0!important;
+  max-width:none!important;
+  max-height:none!important;
+  overflow-y:scroll!important;
+  overflow-x:hidden!important;
+  touch-action:pan-y!important;
+  overscroll-behavior-y:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+}
+.touch-screen .touch-content.no-pad{
+  overflow:hidden!important;
+}
+.touch-screen .chat-page{
+  width:100%!important;
+  height:100%!important;
+  min-width:0!important;
+  min-height:0!important;
+  overflow:hidden!important;
+}
+.touch-screen .chat-log{
+  position:relative!important;
+  min-width:0!important;
+  min-height:0!important;
+  overflow-y:scroll!important;
+  overflow-x:hidden!important;
+  touch-action:pan-y!important;
+  -webkit-overflow-scrolling:touch!important;
+}
+.touch-screen .touch-content::-webkit-scrollbar,
+.touch-screen .chat-log::-webkit-scrollbar,
+.dialogue::-webkit-scrollbar,.modal-card::-webkit-scrollbar{width:5px}
+.touch-screen .touch-content::-webkit-scrollbar-thumb,
+.touch-screen .chat-log::-webkit-scrollbar-thumb,
+.dialogue::-webkit-scrollbar-thumb,.modal-card::-webkit-scrollbar-thumb{background:#748075;border-radius:5px}
+@media(max-width:530px){
+  .touch-screen>.touch-app{grid-template-rows:36px minmax(0,1fr)!important}
+}
+@media(max-height:760px) and (orientation:portrait){
+  .touch-screen>.touch-app{grid-template-rows:30px minmax(0,1fr)!important}
+}
+
 </style>
 </head>
 <body>
@@ -490,9 +559,60 @@ $$('[data-dir]').forEach(b=>bindPress(b,()=>moveNav(b.dataset.dir)));
 $$('[data-key]').forEach(b=>bindPress(b,()=>{const k=b.dataset.key;if(k==='A')runtime.page==='talk'?($('#chatInput')?.focus()):pressA();if(k==='B')back()}));
 bindPress($('#startBtn'),()=>{if(state){save(true);flash()}else renderTitle()});
 bindPress($('#selectBtn'),()=>{if(state)openStatusModal();else notify('没有载入存档')});
+
+
+/* 手机端小屏拖动滚动兜底：仅在产生明显纵向拖动时接管，不改变按钮点击功能 */
+(function enableTouchScreenDragScroll(){
+  const screen=document.getElementById('touchScreen');
+  const content=document.getElementById('touchContent');
+  if(!screen||!content)return;
+  let active=null,startY=0,lastY=0,moved=false;
+  const canScroll=el=>el&&el.scrollHeight>el.clientHeight+1;
+  const pickScrollTarget=target=>{
+    const own=target?.closest?.('.chat-log,.modal-card,.dialogue,.studio-status,.touch-content');
+    if(canScroll(own))return own;
+    const chat=document.getElementById('chatLog');
+    if(canScroll(chat))return chat;
+    if(canScroll(content))return content;
+    const modal=document.querySelector('.modal-card');
+    if(canScroll(modal))return modal;
+    return null;
+  };
+  screen.addEventListener('touchstart',e=>{
+    if(e.touches.length!==1)return;
+    const target=e.target;
+    if(target?.closest?.('input,textarea,select,[contenteditable="true"]')){active=null;return;}
+    active=pickScrollTarget(target);
+    startY=lastY=e.touches[0].clientY;
+    moved=false;
+  },{passive:true,capture:true});
+  screen.addEventListener('touchmove',e=>{
+    if(!active||e.touches.length!==1)return;
+    const y=e.touches[0].clientY;
+    const total=y-startY;
+    if(!moved&&Math.abs(total)<5)return;
+    moved=true;
+    const delta=lastY-y;
+    lastY=y;
+    const before=active.scrollTop;
+    active.scrollTop+=delta;
+    if(active.scrollTop!==before||canScroll(active))e.preventDefault();
+  },{passive:false,capture:true});
+  screen.addEventListener('touchend',e=>{
+    if(moved){
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+    }
+    active=null;
+    moved=false;
+  },{passive:false,capture:true});
+  screen.addEventListener('touchcancel',()=>{active=null;moved=false},{passive:true,capture:true});
+})();
+
 window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const map={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'};if(map[e.key]){e.preventDefault();moveNav(map[e.key])}if(e.key.toLowerCase()==='z'||e.key==='Enter'){e.preventDefault();pressA()}if(e.key.toLowerCase()==='x'||e.key==='Escape'){e.preventDefault();back()}});
 window.addEventListener('beforeunload',()=>{if(state&&runtime.dirty)save(false)});window.addEventListener('visibilitychange',()=>{if(document.hidden&&state)save(false)});
-setInterval(updateClock,30000);if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js?v=buttonfix5',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});startBoot();
+setInterval(updateClock,30000);if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js?v=scrollfix7',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});startBoot();
 })();
 </script>
 </body>
