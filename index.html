@@ -174,18 +174,62 @@ if(mode==='greenOnly'||existingTransparent<total*.015){
     for(let idx=0;idx<total;idx++)if(mask[idx]){const i=idx*4;d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0}
     const dist=new Uint8Array(total),ringQueue=new Int32Array(total);let rh=0,rt=0;
     for(let idx=0;idx<total;idx++){if(d[idx*4+3]===0){dist[idx]=1;ringQueue[rt++]=idx}}
-    while(rh<rt){const idx=ringQueue[rh++],level=dist[idx];if(level>=6)continue;const x=idx%w,y=(idx/w)|0;const visit=n=>{if(n>=0&&n<total&&dist[n]===0){dist[n]=level+1;ringQueue[rt++]=n}};if(x>0)visit(idx-1);if(x<w-1)visit(idx+1);if(y>0)visit(idx-w);if(y<h-1)visit(idx+w)}
+    while(rh<rt){const idx=ringQueue[rh++],level=dist[idx];if(level>=9)continue;const x=idx%w,y=(idx/w)|0;const visit=n=>{if(n>=0&&n<total&&dist[n]===0){dist[n]=level+1;ringQueue[rt++]=n}};if(x>0)visit(idx-1);if(x<w-1)visit(idx+1);if(y>0)visit(idx-w);if(y<h-1)visit(idx+w)}
+    const srcCopy=new Uint8ClampedArray(d);
+    const isGreenish=(r,g,b)=>g>72&&(g-Math.max(r,b)>5||g>r*1.06&&g>b*1.06);
     for(let idx=0;idx<total;idx++){
-      const level=dist[idx];if(level<2||level>6)continue;
-      const i=idx*4,a=d[i+3];if(a===0)continue;
-      const r=d[i],g=d[i+1],b=d[i+2],maxRB=Math.max(r,b),excess=g-maxRB;
-      const greenSpill=g>88&&excess>10&&g>r*1.10&&g>b*1.10;
-      if(!greenSpill)continue;
-      const edgeStrength=(7-level)/5,alphaStrength=(255-a)/255;
-      const strength=Math.min(.96,.38+edgeStrength*.48+alphaStrength*.28);
-      const target=Math.min(255,maxRB+3);
-      d[i+1]=Math.max(0,Math.min(255,Math.round(g*(1-strength)+target*strength)));
-      if(a<32){d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0}
+      const level=dist[idx];if(level<2||level>9)continue;
+      const i=idx*4,a=srcCopy[i+3];if(a===0)continue;
+      const r=srcCopy[i],g=srcCopy[i+1],b=srcCopy[i+2];
+      if(!isGreenish(r,g,b))continue;
+      const x=idx%w,y=(idx/w)|0;
+      let sr=0,sg=0,sb=0,sw=0;
+      for(let radius=1;radius<=5;radius++){
+        for(let yy=-radius;yy<=radius;yy++)for(let xx=-radius;xx<=radius;xx++){
+          if(Math.max(Math.abs(xx),Math.abs(yy))!==radius)continue;
+          const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=w||ny>=h)continue;
+          const ni=(ny*w+nx)*4,na=srcCopy[ni+3];if(na<150)continue;
+          const nr=srcCopy[ni],ng=srcCopy[ni+1],nb=srcCopy[ni+2];
+          if(isGreenish(nr,ng,nb))continue;
+          const weight=(6-radius)*(na/255);
+          sr+=nr*weight;sg+=ng*weight;sb+=nb*weight;sw+=weight;
+        }
+        if(sw>=16)break;
+      }
+      const edgeStrength=(10-level)/8,alphaStrength=(255-a)/255;
+      const strength=Math.min(.98,.58+edgeStrength*.30+alphaStrength*.18);
+      let tr,tg,tb;
+      if(sw>0){tr=sr/sw;tg=sg/sw;tb=sb/sw}else{
+        const neutral=(r+b)/2;
+        tr=Math.max(r,neutral*.88);tb=Math.max(b,neutral*.88);tg=Math.min(g,neutral);
+      }
+      const oldLum=.2126*r+.7152*g+.0722*b;
+      let nr=r*(1-strength)+tr*strength,ng=g*(1-strength)+tg*strength,nb=b*(1-strength)+tb*strength;
+      const newLum=.2126*nr+.7152*ng+.0722*nb;
+      const lumScale=newLum>1?Math.min(1.28,Math.max(.72,oldLum/newLum)):1;
+      nr*=lumScale;ng*=lumScale;nb*=lumScale;
+      if(ng>Math.max(nr,nb)+2)ng=Math.max(nr,nb)+2;
+      d[i]=Math.max(0,Math.min(255,Math.round(nr)));
+      d[i+1]=Math.max(0,Math.min(255,Math.round(ng)));
+      d[i+2]=Math.max(0,Math.min(255,Math.round(nb)));
+      if(a<24){d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0}
+    }
+    for(let pass=0;pass<2;pass++){
+      const passCopy=new Uint8ClampedArray(d);
+      for(let idx=0;idx<total;idx++){
+        const level=dist[idx];if(level<2||level>7)continue;
+        const i=idx*4,a=passCopy[i+3];if(a===0)continue;
+        const r=passCopy[i],g=passCopy[i+1],b=passCopy[i+2];
+        if(!(g>Math.max(r,b)+4))continue;
+        const x=idx%w,y=(idx/w)|0;let sr=0,sg=0,sb=0,c=0;
+        for(let yy=-1;yy<=1;yy++)for(let xx=-1;xx<=1;xx++){
+          if(!xx&&!yy)continue;const nx=x+xx,ny=y+yy;if(nx<0||ny<0||nx>=w||ny>=h)continue;
+          const ni=(ny*w+nx)*4;if(passCopy[ni+3]<120)continue;
+          const nr=passCopy[ni],ng=passCopy[ni+1],nb=passCopy[ni+2];if(ng>Math.max(nr,nb)+6)continue;
+          sr+=nr;sg+=ng;sb+=nb;c++;
+        }
+        if(c){d[i]=Math.round((r+sr/c*2)/3);d[i+1]=Math.round((g+sg/c*2)/3);d[i+2]=Math.round((b+sb/c*2)/3)}
+      }
     }
   }else{
     const edge=[];const step=Math.max(1,Math.floor(Math.min(w,h)/90));const add=(x,y)=>{const i=(y*w+x)*4;edge.push([d[i],d[i+1],d[i+2]])};
@@ -223,8 +267,8 @@ if(mode==='greenOnly'||existingTransparent<total*.015){
 ctx.putImageData(imageData,0,0);
 let l=w,t=h,r=-1,b=-1;for(let y=0;y<h;y++)for(let x=0;x<w;x++){if(d[(y*w+x)*4+3]>18){l=Math.min(l,x);t=Math.min(t,y);r=Math.max(r,x);b=Math.max(b,y)}}
 if(r<l||b<t){resolve(canvas.toDataURL('image/png'));return}
-let bw=r-l+1,bh=b-t+1;const likelyFullBody=bh>bw*1.62;let cropBottom=b;if(likelyFullBody)cropBottom=Math.min(b,t+Math.round(bh*.90));const cropH=cropBottom-t+1;const padX=Math.round(Math.max(bw,cropH)*.11),padTop=Math.round(Math.max(bw,cropH)*.05),padBottom=Math.round(Math.max(bw,cropH)*.13),sx=Math.max(0,l-padX),sy=Math.max(0,t-padTop),sw=Math.min(w-sx,bw+padX*2),sh=Math.min(h-sy,cropH+padTop+padBottom),out=document.createElement('canvas');out.width=Math.max(1,sw);out.height=Math.max(1,sh);out.getContext('2d').drawImage(canvas,sx,sy,sw,sh,0,0,sw,sh);resolve(out.toDataURL('image/png'))}catch(e){resolve(dataUrl)}};img.onerror=()=>resolve(dataUrl);img.src=dataUrl})}
-async function repairStoredPortraitGreenSpill(){const repairKey='dual_soul_green_spill_repair_v2';if(localStorage.getItem(repairKey)==='1'||!state)return;ensureVisualState();let changed=false;for(const slot of state.visuals.portraits){if(!slot.hasImage||!slot.assetKey)continue;try{const data=await assetGet(slot.assetKey);if(!data)continue;const fixed=await processPortraitDataURL(data,'greenOnly');await assetSet(slot.assetKey,fixed);changed=true}catch(e){console.warn('portrait green spill repair failed',slot.id,e)}}localStorage.setItem(repairKey,'1');if(changed){await renderVisualLayers();if(runtime.page==='studio')renderStudio();notify('已自动修复人物绿边，并放宽肩膀裁切')}}
+let bw=r-l+1,bh=b-t+1;const likelyFullBody=bh>bw*1.62;let cropBottom=b;if(likelyFullBody)cropBottom=Math.min(b,t+Math.round(bh*.93));const cropH=cropBottom-t+1;const base=Math.max(bw,cropH);const padX=Math.round(base*.16),padTop=Math.round(base*.07),padBottom=Math.round(base*.20),sx=Math.max(0,l-padX),sy=Math.max(0,t-padTop),sw=Math.min(w-sx,bw+padX*2),sh=Math.min(h-sy,cropH+padTop+padBottom),out=document.createElement('canvas');out.width=Math.max(1,sw);out.height=Math.max(1,sh);const outCtx=out.getContext('2d');outCtx.drawImage(canvas,sx,sy,sw,sh,0,0,sw,sh);const outerPadX=Math.round(sw*.10),outerPadTop=Math.round(sh*.05),outerPadBottom=Math.round(sh*.08),framed=document.createElement('canvas');framed.width=sw+outerPadX*2;framed.height=sh+outerPadTop+outerPadBottom;const framedCtx=framed.getContext('2d');framedCtx.drawImage(out,outerPadX,outerPadTop);resolve(framed.toDataURL('image/png'))}catch(e){resolve(dataUrl)}};img.onerror=()=>resolve(dataUrl);img.src=dataUrl})}
+async function repairStoredPortraitGreenSpill(){const repairKey='dual_soul_green_spill_repair_v3';if(localStorage.getItem(repairKey)==='1'||!state)return;ensureVisualState();let changed=false;for(const slot of state.visuals.portraits){if(!slot.hasImage||!slot.assetKey)continue;try{const data=await assetGet(slot.assetKey);if(!data)continue;const fixed=await processPortraitDataURL(data,'greenOnly');await assetSet(slot.assetKey,fixed);changed=true}catch(e){console.warn('portrait green spill repair failed',slot.id,e)}}localStorage.setItem(repairKey,'1');if(changed){await renderVisualLayers();if(runtime.page==='studio')renderStudio();notify('已自动进行加强版去绿边修复，并保留人物轮廓')}}
 function visualSlot(kind,id){ensureVisualState();const list=kind==='portrait'?state.visuals.portraits:state.visuals.backgrounds;return list.find(x=>x.id===id)}
 async function renderVisualLayers(){if(!state)return;ensureVisualState();const token=++runtime.visualRenderToken,p=visualSlot('portrait',state.visuals.currentPortrait),b=visualSlot('background',state.visuals.currentBackground);let pData='',bData='';try{[pData,bData]=await Promise.all([p?.hasImage?assetGet(p.assetKey):'',b?.hasImage?assetGet(b.assetKey):''])}catch(e){}if(token!==runtime.visualRenderToken)return;els.scene.classList.add('custom-bg-active');if(bData){els.customBg.src=bData;els.customBg.classList.remove('hidden')}else{els.customBg.removeAttribute('src');els.customBg.classList.add('hidden')}if(pData){els.avatar.src=pData;els.avatar.classList.remove('hidden')}else{els.avatar.removeAttribute('src');els.avatar.classList.add('hidden')}els.char.classList.add('hidden-sprite')}
 function textApiKey(){const a=state.settings.textApi;return a.rememberKey?(localStorage.getItem('dual_soul_text_api_key')||''):(sessionStorage.getItem(TEXT_SESSION_KEY)||'')}
