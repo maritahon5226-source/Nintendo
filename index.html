@@ -8,7 +8,7 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="pocky">
 <meta name="application-name" content="pocky">
-<link rel="manifest" href="./manifest.json?v=clickfix3">
+<link rel="manifest" href="./manifest.json?v=clickfix4">
 <title>pocky</title>
 <style>
 :root{
@@ -397,14 +397,17 @@ const UI_SELECTOR='button,[data-go],[data-act],[data-memory-tab],[data-settings-
 function activateScreenControl(e){const target=e.target?.closest?.(UI_SELECTOR);if(!target||!els.content.contains(target))return;const now=Date.now();if(e.type==='click'&&runtime.lastUiTouchTarget===target&&now-runtime.lastUiTouchAt<650)return;if((e.type==='pointerup'&&e.pointerType!=='mouse')||e.type==='touchend'){runtime.lastUiTouchTarget=target;runtime.lastUiTouchAt=now;e.preventDefault?.();onClick({target});if(target.id==='chatSend')sendTalk();return}onClick(e);if(target.id==='chatSend')sendTalk()}
 els.content.addEventListener('click',activateScreenControl);
 if(window.PointerEvent)els.content.addEventListener('pointerup',activateScreenControl,{passive:false});else els.content.addEventListener('touchend',activateScreenControl,{passive:false});
-els.back.addEventListener('click',back);els.back.addEventListener('pointerup',e=>{if(e.pointerType!=='mouse'){e.preventDefault();back()}},{passive:false});els.importFile.addEventListener('change',e=>e.target.files[0]&&importSave(e.target.files[0]));els.avatarFile.addEventListener('change',e=>e.target.files[0]&&importAvatar(e.target.files[0]));els.visualAssetFile.addEventListener('change',e=>e.target.files[0]&&importVisualAsset(e.target.files[0]));els.visualReferenceFile.addEventListener('change',e=>e.target.files.length&&importVisualReferences(e.target.files));
+els.importFile.addEventListener('change',e=>e.target.files[0]&&importSave(e.target.files[0]));els.avatarFile.addEventListener('change',e=>e.target.files[0]&&importAvatar(e.target.files[0]));els.visualAssetFile.addEventListener('change',e=>e.target.files[0]&&importVisualAsset(e.target.files[0]));els.visualReferenceFile.addEventListener('change',e=>e.target.files.length&&importVisualReferences(e.target.files));
 els.content.addEventListener('keydown',e=>{if(e.target.id==='chatInput'&&e.key==='Enter'&&!e.shiftKey){e.preventDefault();sendTalk()}});
-function bindPress(el,fn){let touchedAt=0;el.addEventListener('pointerup',e=>{if(e.pointerType==='mouse')return;touchedAt=Date.now();e.preventDefault();fn()},{passive:false});el.addEventListener('click',()=>{if(Date.now()-touchedAt<650)return;fn()})}
-$$('[data-dir]').forEach(b=>bindPress(b,()=>moveNav(b.dataset.dir)));$$('[data-key]').forEach(b=>bindPress(b,()=>{const k=b.dataset.key;if(k==='A')runtime.page==='talk'?($('#chatInput')?.focus()):pressA();if(k==='B')back()}));
-$('#startBtn').addEventListener('click',()=>{if(state){save(true);flash()}else renderTitle()});$('#selectBtn').addEventListener('click',()=>{if(state)openStatusModal();else notify('没有载入存档')});
+function bindPress(el,fn){if(!el)return;let touchedAt=0;const run=()=>{try{fn()}catch(err){console.error(err);notify('按钮执行失败')}};if(window.PointerEvent){el.addEventListener('pointerup',e=>{if(e.pointerType==='mouse')return;touchedAt=Date.now();e.preventDefault();e.stopPropagation();run()},{passive:false})}else{el.addEventListener('touchend',e=>{touchedAt=Date.now();e.preventDefault();e.stopPropagation();run()},{passive:false})}el.addEventListener('click',e=>{if(Date.now()-touchedAt<700)return;e.preventDefault();run()})}
+bindPress(els.back,back);
+$$('[data-dir]').forEach(b=>bindPress(b,()=>moveNav(b.dataset.dir)));
+$$('[data-key]').forEach(b=>bindPress(b,()=>{const k=b.dataset.key;if(k==='A')runtime.page==='talk'?($('#chatInput')?.focus()):pressA();if(k==='B')back()}));
+bindPress($('#startBtn'),()=>{if(state){save(true);flash()}else renderTitle()});
+bindPress($('#selectBtn'),()=>{if(state)openStatusModal();else notify('没有载入存档')});
 window.addEventListener('keydown',e=>{if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName))return;const map={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right'};if(map[e.key]){e.preventDefault();moveNav(map[e.key])}if(e.key.toLowerCase()==='z'||e.key==='Enter'){e.preventDefault();pressA()}if(e.key.toLowerCase()==='x'||e.key==='Escape'){e.preventDefault();back()}});
 window.addEventListener('beforeunload',()=>{if(state&&runtime.dirty)save(false)});window.addEventListener('visibilitychange',()=>{if(document.hidden&&state)save(false)});
-setInterval(updateClock,30000);if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js?v=clickfix3',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});startBoot();
+setInterval(updateClock,30000);if('serviceWorker' in navigator&&location.protocol.startsWith('http'))navigator.serviceWorker.register('./sw.js?v=clickfix4',{updateViaCache:'none'}).then(r=>r.update()).catch(()=>{});startBoot();
 })();
 </script>
 </body>
