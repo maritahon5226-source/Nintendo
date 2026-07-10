@@ -161,70 +161,7 @@ async function assetSet(key,value){const db=await openAssetDB();await new Promis
 async function assetGet(key){if(!key)return'';if(runtime.assetCache.has(key))return runtime.assetCache.get(key);const db=await openAssetDB();const value=await new Promise((resolve,reject)=>{const tx=db.transaction('assets','readonly');const r=tx.objectStore('assets').get(key);r.onsuccess=()=>resolve(r.result||'');r.onerror=()=>reject(r.error)});if(value)runtime.assetCache.set(key,value);return value}
 async function assetDelete(key){if(!key)return;const db=await openAssetDB();await new Promise((resolve,reject)=>{const tx=db.transaction('assets','readwrite');tx.objectStore('assets').delete(key);tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error)});runtime.assetCache.delete(key)}
 function imageFileToDataURL(file,maxW=1280,maxH=1280,type='image/png',quality=.92){return new Promise((resolve,reject)=>{const img=new Image(),url=URL.createObjectURL(file);img.onload=()=>{try{const scale=Math.min(1,maxW/img.width,maxH/img.height),c=document.createElement('canvas');c.width=Math.max(1,Math.round(img.width*scale));c.height=Math.max(1,Math.round(img.height*scale));const x=c.getContext('2d');x.imageSmoothingEnabled=true;x.imageSmoothingQuality='high';x.drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);resolve(c.toDataURL(type,quality))}catch(e){reject(e)}};img.onerror=reject;img.src=url})}
-function processPortraitDataURL(dataUrl,mode='auto'){return new Promise(resolve=>{const img=new Image();img.onload=()=>{try{const max=1100,scale=Math.min(1,max/img.width,max/img.height),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(img,0,0,w,h);const imageData=ctx.getImageData(0,0,w,h),d=imageData.data,total=w*h;
-let existingTransparent=0;for(let i=3;i<d.length;i+=4)if(d[i]<245)existingTransparent++;
-if(mode==='whiteOnly'||existingTransparent<total*.015){
-  if(mode==='whiteOnly'){
-    const mask=new Uint8Array(total),queue=new Int32Array(total);let qh=0,qt=0;
-    const inSubjectZone=(x,y)=>x>=w*.14&&x<=w*.86&&y>=h*.015&&y<=h*.985;
-    const inBodyCore=(x,y)=>x>=w*.24&&x<=w*.76&&y>=h*.56;
-    const isPureWhiteIdx=(idx)=>{const x=idx%w,y=(idx/w)|0,i=idx*4,r=d[i],g=d[i+1],b=d[i+2],a=d[i+3];if(a<14)return true;if(inBodyCore(x,y))return false;const spread=Math.max(r,g,b)-Math.min(r,g,b);if(inSubjectZone(x,y))return r>251&&g>251&&b>251&&spread<7;return r>242&&g>242&&b>242&&spread<15};
-    const isConnectedWhiteIdx=(idx,parentIdx=-1)=>{const x=idx%w,y=(idx/w)|0,i=idx*4,r=d[i],g=d[i+1],b=d[i+2],a=d[i+3];if(a<14)return true;if(inBodyCore(x,y))return false;const spread=Math.max(r,g,b)-Math.min(r,g,b);const subject=inSubjectZone(x,y);const pure=subject?(r>250&&g>250&&b>250&&spread<8):(r>242&&g>242&&b>242&&spread<15);if(pure)return true;const soft=subject?(r>246&&g>246&&b>246&&spread<11):(r>224&&g>224&&b>224&&spread<25);if(!soft||parentIdx<0)return false;const pi=parentIdx*4,local=Math.hypot(r-d[pi],g-d[pi+1],b-d[pi+2]);return local<(subject?13:24)};
-    const seed=(idx)=>{if(!mask[idx]&&isPureWhiteIdx(idx)){mask[idx]=1;queue[qt++]=idx}};
-    for(let x=0;x<w;x++){seed(x);if(x<w*.20||x>w*.80)seed((h-1)*w+x)}for(let y=1;y<h-1;y++){seed(y*w);seed(y*w+w-1)}
-    while(qh<qt){const idx=queue[qh++],x=idx%w,y=(idx/w)|0;const visit=n=>{if(n>=0&&n<total&&!mask[n]&&isConnectedWhiteIdx(n,idx)){mask[n]=1;queue[qt++]=n}};if(x>0)visit(idx-1);if(x<w-1)visit(idx+1);if(y>0)visit(idx-w);if(y<h-1)visit(idx+w)}
-    for(let idx=0;idx<total;idx++)if(mask[idx]){const i=idx*4;d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0}
-    const dist=new Uint8Array(total),ringQueue=new Int32Array(total);let rh=0,rt=0;
-    for(let idx=0;idx<total;idx++){if(d[idx*4+3]===0){dist[idx]=1;ringQueue[rt++]=idx}}
-    while(rh<rt){const idx=ringQueue[rh++],level=dist[idx];if(level>=4)continue;const x=idx%w,y=(idx/w)|0;const visit=n=>{if(n>=0&&n<total&&dist[n]===0){dist[n]=level+1;ringQueue[rt++]=n}};if(x>0)visit(idx-1);if(x<w-1)visit(idx+1);if(y>0)visit(idx-w);if(y<h-1)visit(idx+w)}
-    for(let idx=0;idx<total;idx++){
-      const level=dist[idx];if(level<2||level>4)continue;
-      const i=idx*4,a=d[i+3];if(a===0)continue;
-      const r=d[i],g=d[i+1],b=d[i+2],spread=Math.max(r,g,b)-Math.min(r,g,b),minC=Math.min(r,g,b);
-      const whiteFringe=minC>218&&spread<28;
-      if(!whiteFringe)continue;
-      const whiteness=Math.min(1,(minC-218)/37),edgeStrength=(5-level)/3;
-      const alpha=Math.max(145,Math.round(255*(1-whiteness*.38*edgeStrength)));
-      d[i+3]=Math.min(a,alpha);
-      if(d[i+3]<32){d[i]=0;d[i+1]=0;d[i+2]=0;d[i+3]=0}
-    }
-  }else{
-    const edge=[];const step=Math.max(1,Math.floor(Math.min(w,h)/90));const add=(x,y)=>{const i=(y*w+x)*4;edge.push([d[i],d[i+1],d[i+2]])};
-    for(let x=0;x<w;x+=step){add(x,0);add(x,h-1)}for(let y=0;y<h;y+=step){add(0,y);add(w-1,y)}
-    const buckets=new Map();for(const c of edge){const k=`${c[0]>>4},${c[1]>>4},${c[2]>>4}`;const old=buckets.get(k)||{n:0,r:0,g:0,b:0};old.n++;old.r+=c[0];old.g+=c[1];old.b+=c[2];buckets.set(k,old)}
-    const clusters=[...buckets.values()].sort((a,b)=>b.n-a.n).slice(0,4).map(x=>[x.r/x.n,x.g/x.n,x.b/x.n]);
-    const cornerColors=[[0,0],[w-1,0],[0,h-1],[w-1,h-1]].map(([x,y])=>{const i=(y*w+x)*4;return[d[i],d[i+1],d[i+2]]});
-    for(const c of cornerColors)clusters.push(c);
-    const colorDist=(r,g,b,c)=>Math.hypot(r-c[0],g-c[1],b-c[2]);
-    const isNearWhite=(r,g,b)=>r>218&&g>218&&b>218;
-    const isNearBlack=(r,g,b)=>r<42&&g<42&&b<42;
-    const isNearGray=(r,g,b)=>Math.max(r,g,b)-Math.min(r,g,b)<16 && ((r+g+b)/3>175 || (r+g+b)/3<85);
-    const mask=new Uint8Array(total),queue=new Int32Array(total);let qh=0,qt=0;
-    const protectedLeft=Math.round(w*.16),protectedRight=Math.round(w*.84),protectedTop=Math.round(h*.04),protectedBottom=Math.round(h*.985);
-    const inProtected=(x,y)=>x>=protectedLeft&&x<=protectedRight&&y>=protectedTop&&y<=protectedBottom;
-    const bgLike=(idx,parentIdx=-1)=>{const x=idx%w,y=(idx/w)|0,i=idx*4,r=d[i],g=d[i+1],b=d[i+2],a=d[i+3];if(a<14)return true;const pureGreen=g>120&&g>r*1.28&&g>b*1.28&&r<165&&b<165;if(pureGreen)return true;let best=999;for(const c of clusters)best=Math.min(best,colorDist(r,g,b,c));const neutral=isNearWhite(r,g,b)||isNearBlack(r,g,b)||isNearGray(r,g,b);let local=999;if(parentIdx>=0){const pi=parentIdx*4;local=Math.hypot(r-d[pi],g-d[pi+1],b-d[pi+2])}
-      if(inProtected(x,y)){
-        if(pureGreen && best<72)return true;
-        if(neutral && best<26 && local<14)return true;
-        return false;
-      }
-      if(best<26)return true;
-      if(neutral && best<34)return true;
-      if(parentIdx>=0 && local<12 && best<40)return true;
-      return false;
-    };
-    const seed=idx=>{if(!mask[idx]&&bgLike(idx)){mask[idx]=1;queue[qt++]=idx}};
-    for(let x=0;x<w;x++){seed(x);seed((h-1)*w+x)}for(let y=1;y<h-1;y++){seed(y*w);seed(y*w+w-1)}
-    while(qh<qt){const idx=queue[qh++],x=idx%w,y=(idx/w)|0;const visit=n=>{if(n>=0&&n<total&&!mask[n]&&bgLike(n,idx)){mask[n]=1;queue[qt++]=n}};if(x>0)visit(idx-1);if(x<w-1)visit(idx+1);if(y>0)visit(idx-w);if(y<h-1)visit(idx+w)}
-    for(let idx=0;idx<total;idx++)if(mask[idx])d[idx*4+3]=0;
-    const alphaCopy=new Uint8Array(total);for(let idx=0;idx<total;idx++)alphaCopy[idx]=d[idx*4+3];
-    for(let y=1;y<h-1;y++)for(let x=1;x<w-1;x++){const idx=y*w+x;if(alphaCopy[idx]===0)continue;let transparentNeighbours=0;for(let yy=-1;yy<=1;yy++)for(let xx=-1;xx<=1;xx++)if(alphaCopy[(y+yy)*w+x+xx]===0)transparentNeighbours++;if(transparentNeighbours>=5)d[idx*4+3]=Math.min(d[idx*4+3],transparentNeighbours>=7?170:220)}
-  }
-}
-ctx.putImageData(imageData,0,0);
-/* 保留生成图与上传图的完整原始画布：不按人物边界裁剪左右，也不裁掉上下内容。显示阶段只在游戏机上屏内使用 contain 等比例缩放。 */
-resolve(canvas.toDataURL('image/png'))}catch(e){resolve(dataUrl)}};img.onerror=()=>resolve(dataUrl);img.src=dataUrl})}
-async function repairStoredPortraitGreenSpill(){return}
+function processPortraitDataURL(dataUrl,mode='whiteOnly'){return new Promise(resolve=>{const img=new Image();img.onload=()=>{try{const max=1100,scale=Math.min(1,max/img.width,max/img.height),w=Math.max(1,Math.round(img.width*scale)),h=Math.max(1,Math.round(img.height*scale)),canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;const ctx=canvas.getContext('2d',{willReadFrequently:true});ctx.imageSmoothingEnabled=true;ctx.imageSmoothingQuality='high';ctx.drawImage(img,0,0,w,h);const imageData=ctx.getImageData(0,0,w,h),d=imageData.data,total=w*h;let existingTransparent=0;for(let i=3;i<d.length;i+=4)if(d[i]<245)existingTransparent++;if(existingTransparent<total*.015&&mode==='whiteOnly'){const mask=new Uint8Array(total),queue=new Int32Array(total);let qh=0,qt=0;const isPureWhiteIdx=idx=>{const i=idx*4,r=d[i],g=d[i+1],b=d[i+2],a=d[i+3];if(a<14)return true;return r>242&&g>242&&b>242};const isNearWhiteIdx=(idx,parentIdx=-1)=>{const i=idx*4,r=d[i],g=d[i+1],b=d[i+2],a=d[i+3];if(a<14)return true;const pure=r>242&&g>242&&b>242;if(pure)return true;const soft=r>228&&g>228&&b>228&&Math.max(r,g,b)-Math.min(r,g,b)<18;if(!soft)return false;if(parentIdx<0)return soft;const pi=parentIdx*4;const local=Math.hypot(r-d[pi],g-d[pi+1],b-d[pi+2]);return local<18};const seed=idx=>{if(!mask[idx]&&isPureWhiteIdx(idx)){mask[idx]=1;queue[qt++]=idx}};for(let x=0;x<w;x++){seed(x);seed((h-1)*w+x)}for(let y=1;y<h-1;y++){seed(y*w);seed(y*w+w-1)}while(qh<qt){const idx=queue[qh++],x=idx%w,y=(idx/w)|0;const visit=n=>{if(n>=0&&n<total&&!mask[n]&&isNearWhiteIdx(n,idx)){mask[n]=1;queue[qt++]=n}};if(x>0)visit(idx-1);if(x<w-1)visit(idx+1);if(y>0)visit(idx-w);if(y<h-1)visit(idx+w)}for(let idx=0;idx<total;idx++)if(mask[idx])d[idx*4+3]=0;const alphaCopy=new Uint8Array(total);for(let idx=0;idx<total;idx++)alphaCopy[idx]=d[idx*4+3];for(let y=1;y<h-1;y++){for(let x=1;x<w-1;x++){const idx=y*w+x;if(alphaCopy[idx]===0)continue;const i=idx*4,r=d[i],g=d[i+1],b=d[i+2];const softWhite=r>230&&g>230&&b>230&&Math.max(r,g,b)-Math.min(r,g,b)<20;if(!softWhite)continue;let transparentNeighbours=0;for(let yy=-1;yy<=1;yy++){for(let xx=-1;xx<=1;xx++){if(alphaCopy[(y+yy)*w+x+xx]===0)transparentNeighbours++}}if(transparentNeighbours>=7)d[i+3]=Math.min(d[i+3],205)}}}ctx.putImageData(imageData,0,0);resolve(canvas.toDataURL('image/png'))}catch(e){resolve(dataUrl)}};img.onerror=()=>resolve(dataUrl);img.src=dataUrl})}
 function visualSlot(kind,id){ensureVisualState();const list=kind==='portrait'?state.visuals.portraits:state.visuals.backgrounds;return list.find(x=>x.id===id)}
 async function renderVisualLayers(){if(!state)return;ensureVisualState();const token=++runtime.visualRenderToken,p=visualSlot('portrait',state.visuals.currentPortrait),b=visualSlot('background',state.visuals.currentBackground);let pData='',bData='';try{[pData,bData]=await Promise.all([p?.hasImage?assetGet(p.assetKey):'',b?.hasImage?assetGet(b.assetKey):''])}catch(e){}if(token!==runtime.visualRenderToken)return;els.scene.classList.add('custom-bg-active');if(bData){els.customBg.src=bData;els.customBg.classList.remove('hidden')}else{els.customBg.removeAttribute('src');els.customBg.classList.add('hidden')}if(pData){els.avatar.src=pData;els.avatar.classList.remove('hidden')}else{els.avatar.removeAttribute('src');els.avatar.classList.add('hidden')}els.char.classList.add('hidden-sprite')}
 function textApiKey(){const a=state.settings.textApi;return a.rememberKey?(localStorage.getItem('dual_soul_text_api_key')||''):(sessionStorage.getItem(TEXT_SESSION_KEY)||'')}
