@@ -178,6 +178,43 @@ button{max-width:100%}
 .scanlines:after,.custom-avatar,.custom-background{pointer-events:none!important}
 .modal{pointer-events:auto!important}.modal-card,.modal-card *{pointer-events:auto!important}
 
+
+/* ===== 游戏机屏幕纵向滚动修复：仅修复触控滚动，不改变按钮和功能 ===== */
+.touch-screen{touch-action:pan-y!important;overscroll-behavior:contain}
+.touch-app{min-height:0!important;overflow:hidden!important}
+.touch-content{
+  height:100%!important;
+  min-height:0!important;
+  max-height:100%!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  touch-action:pan-y!important;
+  overscroll-behavior-y:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+  scrollbar-gutter:stable;
+}
+.touch-content:not(.no-pad)>:last-child{margin-bottom:12px}
+.touch-content.no-pad{overflow:hidden!important}
+.chat-page{height:100%!important;min-height:0!important;overflow:hidden!important}
+.chat-log{
+  min-height:0!important;
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  touch-action:pan-y!important;
+  overscroll-behavior-y:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+}
+.dialogue{
+  overflow-y:auto!important;
+  overflow-x:hidden!important;
+  touch-action:pan-y!important;
+  overscroll-behavior-y:contain!important;
+  -webkit-overflow-scrolling:touch!important;
+}
+.modal{overflow-y:auto!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important}
+.modal-card{overflow-y:auto!important;overscroll-behavior-y:contain!important;touch-action:pan-y!important;-webkit-overflow-scrolling:touch!important}
+.touch-content input,.touch-content textarea,.touch-content select{touch-action:manipulation}
+
 </style>
 </head>
 <body>
