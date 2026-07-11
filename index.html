@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · 上屏气泡紧凑播放修复版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · 上屏真实音频直传与iOS同步播放修复版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -420,6 +420,13 @@ button{max-width:100%}
   min-height:22px!important;
   vertical-align:middle;
   touch-action:manipulation;
+}
+
+
+.cartridge-top-voice:disabled{
+  opacity:.66;
+  cursor:default;
+  pointer-events:auto;
 }
 
 </style>
@@ -2095,6 +2102,195 @@ function compactCartridgeDialogueText(value){
     .trim();
 }
 
+
+const cartridgeTopVoiceState={
+  key:'',
+  url:'',
+  audio:null,
+  ready:false,
+  loading:false,
+  promise:null,
+  error:''
+};
+
+function clearCartridgeTopVoiceAudio(){
+  const state=cartridgeTopVoiceState;
+  if(state.audio){
+    try{state.audio.pause()}catch(_){}
+    try{
+      state.audio.removeAttribute('src');
+      state.audio.load();
+      state.audio.remove();
+    }catch(_){}
+  }
+  if(state.url){
+    try{URL.revokeObjectURL(state.url)}catch(_){}
+  }
+  state.key='';
+  state.url='';
+  state.audio=null;
+  state.ready=false;
+  state.loading=false;
+  state.promise=null;
+  state.error='';
+}
+
+function cartridgeTopVoiceButton(){
+  return topView?.querySelector?.('.cartridge-top-voice')||null;
+}
+
+function updateCartridgeTopVoiceButton(button,key,status,error=''){
+  if(!button)return;
+  button.dataset.voiceKey=key||'';
+  button.dataset.audioReady=status==='ready'?'1':'0';
+  button.disabled=status!=='ready';
+
+  if(status==='ready'){
+    button.hidden=false;
+    button.textContent='▶ 播放';
+    button.classList.remove('loading','playing');
+    button.title='点击播放角色语音';
+  }else if(status==='loading'){
+    button.hidden=false;
+    button.textContent='语音准备中…';
+    button.classList.add('loading');
+    button.classList.remove('playing');
+    button.title='正在预加载角色语音';
+  }else if(status==='error'){
+    button.hidden=false;
+    button.textContent='语音载入失败';
+    button.classList.remove('loading','playing');
+    button.title=error||'语音载入失败';
+  }else{
+    button.hidden=true;
+    button.textContent='▶ 播放';
+    button.classList.remove('loading','playing');
+    button.title='';
+  }
+}
+
+async function prepareCartridgeTopVoice(button,key,providedBlob=null){
+  key=String(key||'');
+  if(!button||!key)return false;
+
+  const state=cartridgeTopVoiceState;
+  if(state.key===key&&state.ready&&state.audio){
+    updateCartridgeTopVoiceButton(button,key,'ready');
+    return true;
+  }
+  if(state.key===key&&state.loading&&state.promise){
+    return state.promise;
+  }
+
+  clearCartridgeTopVoiceAudio();
+  state.key=key;
+  state.loading=true;
+  updateCartridgeTopVoiceButton(button,key,'loading');
+
+  state.promise=(async()=>{
+    try{
+      let blob=providedBlob;
+      if(!(blob&&typeof blob.arrayBuffer==='function')){
+        blob=await dsGetAudioBlob(key);
+      }
+      if(!blob)throw new Error('游戏机没有收到这条角色语音的真实音频文件');
+
+      blob=await dsNormalizeAudioBlob(blob,'角色剧情语音');
+
+      const url=URL.createObjectURL(blob);
+      const audio=document.createElement('audio');
+      audio.preload='auto';
+      audio.playsInline=true;
+      audio.setAttribute('playsinline','');
+      audio.setAttribute('webkit-playsinline','');
+      audio.style.display='none';
+      audio.src=url;
+      document.body.appendChild(audio);
+
+      await dsWaitAudioReady(audio,12000);
+
+      state.url=url;
+      state.audio=audio;
+      state.ready=true;
+      state.loading=false;
+      state.error='';
+      state.promise=null;
+
+      updateCartridgeTopVoiceButton(button,key,'ready');
+      return true;
+    }catch(error){
+      state.ready=false;
+      state.loading=false;
+      state.error=String(error?.message||error);
+      state.promise=null;
+      updateCartridgeTopVoiceButton(button,key,'error',state.error);
+      throw error;
+    }
+  })();
+
+  return state.promise;
+}
+
+function playPreparedCartridgeTopVoice(button){
+  const state=cartridgeTopVoiceState;
+  const key=String(button?.dataset?.voiceKey||'');
+
+  if(
+    !button||
+    !key||
+    state.key!==key||
+    !state.ready||
+    !state.audio
+  ){
+    notify(state.loading?'语音仍在准备中，请稍等一下':'这条角色语音还没有准备完成');
+    return;
+  }
+
+  const audio=state.audio;
+
+  if(dsttsPlayer&&dsttsPlayer!==audio){
+    try{dsttsPlayer.pause()}catch(_){}
+  }
+  dsttsPlayer=audio;
+
+  try{
+    audio.muted=false;
+    audio.volume=1;
+    if(!audio.paused||audio.currentTime>0){
+      audio.pause();
+      audio.currentTime=0;
+    }
+
+    button.classList.remove('loading');
+    button.classList.add('playing');
+    button.textContent='■ 播放中';
+
+    audio.onended=()=>{
+      button.classList.remove('playing');
+      button.textContent='▶ 重播';
+    };
+    audio.onerror=()=>{
+      button.classList.remove('playing');
+      button.textContent='▶ 重播';
+      notify('播放失败：浏览器无法播放这段角色语音');
+    };
+
+    // Important for iOS: call play() synchronously inside the tap event.
+    const playPromise=audio.play();
+    if(playPromise&&typeof playPromise.catch==='function'){
+      playPromise.catch(error=>{
+        button.classList.remove('playing');
+        button.textContent='▶ 重播';
+        notify('播放失败：'+friendlyError(error));
+      });
+    }
+  }catch(error){
+    button.classList.remove('playing');
+    button.textContent='▶ 重播';
+    notify('播放失败：'+friendlyError(error));
+  }
+}
+
 function applySnapshot(s){
   if(!topView||!s)return;
   const cover=topView.querySelector('.cartridge-top-cover');
@@ -2149,12 +2345,21 @@ function applySnapshot(s){
     audioKey
   );
 
-  voiceButton.hidden=!canPlay;
-  voiceButton.dataset.voiceKey=canPlay?audioKey:'';
   voiceButton.dataset.ttsProvider=s.dialogue?.ttsProvider||'';
   voiceButton.dataset.ttsDuration=String(Number(s.dialogue?.ttsDuration||0));
-  voiceButton.textContent='▶ 播放';
-  voiceButton.classList.remove('playing','loading');
+
+  if(canPlay){
+    void prepareCartridgeTopVoice(voiceButton,audioKey,null)
+      .catch(error=>{
+        console.warn('上屏语音预载失败',error);
+      });
+  }else{
+    if(
+      cartridgeTopVoiceState.key&&
+      cartridgeTopVoiceState.key!==audioKey
+    )clearCartridgeTopVoiceAudio();
+    updateCartridgeTopVoiceButton(voiceButton,'','hidden');
+  }
 }
 function applyCartridgeVoiceReady(voice){
   if(!topView||!voice?.audioKey)return;
@@ -2172,13 +2377,17 @@ function applyCartridgeVoiceReady(voice){
   if(voice.name&&currentName&&voice.name!==currentName)return;
   if(voice.text&&currentText&&compactCartridgeDialogueText(voice.text)!==currentText)return;
 
-  button.hidden=false;
-  button.dataset.voiceKey=String(voice.audioKey);
   button.dataset.ttsProvider=voice.ttsProvider||'';
   button.dataset.ttsDuration=String(Number(voice.ttsDuration||0));
-  button.dataset.voiceSyncVersion=String(voice.voiceSyncVersion||2);
-  button.textContent='▶ 播放';
-  button.classList.remove('playing','loading');
+  button.dataset.voiceSyncVersion=String(voice.voiceSyncVersion||3);
+
+  void prepareCartridgeTopVoice(
+    button,
+    String(voice.audioKey),
+    voice.audioBlob||null
+  ).catch(error=>{
+    console.warn('卡带真实音频预载失败',error);
+  });
 }
 
 async function openCard(html){
@@ -2221,8 +2430,7 @@ async function openCard(html){
       return;
     }
 
-    dsPlayVerifiedVoice(key,mirroredVoiceButton,true)
-      .catch(err=>notify('播放失败：'+friendlyError(err)));
+    playPreparedCartridgeTopVoice(mirroredVoiceButton);
   };
 
   if(window.PointerEvent){
@@ -2302,7 +2510,15 @@ async function openCard(html){
     },80);
   },{once:true});
 }
-function closeCard(update=true){if(topMount)topMount.remove();if(bottomMount)bottomMount.remove();topMount=bottomMount=bottomFrame=topView=null;running=false;btn.classList.remove('running');if(update)refreshMenu()}function choose(){input.value='';input.click()}
+function closeCard(update=true){
+  clearCartridgeTopVoiceAudio();
+  if(topMount)topMount.remove();
+  if(bottomMount)bottomMount.remove();
+  topMount=bottomMount=bottomFrame=topView=null;
+  running=false;
+  btn.classList.remove('running');
+  if(update)refreshMenu();
+}function choose(){input.value='';input.click()}
 btn.addEventListener('click',()=>running?closeCard():showMenu());closeMenu.addEventListener('click',hideMenu);start.addEventListener('click',()=>openCard());importBtn.addEventListener('click',choose);
 eject.addEventListener('click',async()=>{if(!confirm('弹出并删除当前插入的卡带吗？卡带自己的路线存档仍保存在浏览器中。'))return;closeCard(false);await clearStored();await refreshMenu()});
 input.addEventListener('change',async()=>{const file=input.files&&input.files[0];if(!file)return;try{info.textContent='正在读取并写入大容量卡槽…';importBtn.disabled=true;start.disabled=true;const text=await file.text(),m=parseMeta(text);await saveStored(text,m);await refreshMenu();await openCard(text)}catch(err){console.error(err);alert('卡带导入失败：'+friendlyStorageError(err));await refreshMenu()}finally{importBtn.disabled=false;start.disabled=false;input.value=''}});
