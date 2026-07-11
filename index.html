@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · TTS测试与实际回复同链路版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · 角色台词引号TTS与上屏即时播放版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -444,26 +444,76 @@ function scenePeriod(){const h=new Date().getHours();return h<6?'night':h<11?'mo
 function autoWeather(){const n=Number(dateKey().replaceAll('-',''))%10;return n<2?'rain':n===8?'snow':'clear'}
 function updateScene(){if(!state)return;ensureVisualState();els.scene.className='scene custom-bg-active';els.char.classList.add('hidden-sprite');els.mood.textContent=state.status.display||`${state.status.mood} · ${state.status.activity||''}`;renderVisualLayers().catch(()=>{})}
 function naturalStatus(){if(!state)return;state.status.activity='在聊天室';state.status.display=`${state.status.mood||'平静'} · 在聊天室`;updateScene()}
+function dsEnsureChineseQuotedRoleMessage(value){
+  let text=String(value||'').replace(/\r/g,' ').trim();
+  if(!text)return'';
+  if(/“[^”]+”/.test(text))return text;
+
+  const leading=/^((?:(?:（[^）]*）|\([^)]*\)|【[^】]*】|\[[^\]]*\]|〔[^〕]*〕|〈[^〉]*〉|《[^》]*》)\s*)+)/.exec(text);
+  const prefix=leading?leading[1]:'';
+  let speech=leading?text.slice(leading[0].length).trim():text;
+  speech=speech
+    .replace(/^[“”"「」『』]+/,'')
+    .replace(/[“”"「」『』]+$/,'')
+    .trim();
+
+  if(!speech)return text;
+  return prefix+'“'+speech+'”';
+}
+
 function splitRoleReply(text){
   const input=String(text??'').replace(/\r/g,'').trim();
   if(!input)return['……'];
-  const parts=[];let buf='',depth=0;
+
+  const parts=[];
+  let buffer='',depth=0;
   const opens=new Set(['（','(','【','[','《','〈','「','『','“','‘']);
   const closes=new Set(['）',')','】',']','》','〉','」','』','”','’']);
-  const flush=()=>{const v=buf.replace(/\s+/g,' ').trim();if(v)parts.push(v);buf=''};
+  const flush=()=>{
+    const value=buffer.replace(/\s+/g,' ').trim();
+    if(value)parts.push(value);
+    buffer='';
+  };
+
   for(let i=0;i<input.length;i++){
     const ch=input[i];
-    if(ch==='\n'&&depth===0){flush();continue}
-    buf+=ch;
-    if(opens.has(ch)){depth++;continue}
-    if(closes.has(ch)){depth=Math.max(0,depth-1);continue}
+
+    if(ch==='\n'&&depth===0){
+      flush();
+      continue;
+    }
+
+    buffer+=ch;
+
+    if(opens.has(ch)){
+      depth++;
+      continue;
+    }
+
+    if(closes.has(ch)){
+      depth=Math.max(0,depth-1);
+      if(ch==='”'&&depth===0)flush();
+      continue;
+    }
+
     if(depth!==0)continue;
+
     let ended=/[。！？!?]/.test(ch);
-    if(ch==='…'&&input[i+1]==='…'){buf+=input[++i];const next=input[i+1]||'';ended=!next||next==='\n'||/[”’\"'）】》〉」』]/.test(next)}
+    if(ch==='…'&&input[i+1]==='…'){
+      buffer+=input[++i];
+      const next=input[i+1]||'';
+      ended=!next||next==='\n'||/[”’"'）】》〉」』]/.test(next);
+    }
     if(!ended)continue;
-    while(i+1<input.length&&/[”’"'）】》〉」』]/.test(input[i+1]))buf+=input[++i];
+
+    while(
+      i+1<input.length&&
+      /[”’"'）】》〉」』]/.test(input[i+1])
+    )buffer+=input[++i];
+
     flush();
   }
+
   flush();
   return parts.length?parts:['……'];
 }
@@ -666,17 +716,20 @@ async function dsGetAudioUrl(key){
   dsttsUrlCache.set(key,url);
   return url;
 }
+function dsExtractChineseQuotedSpeech(value){
+  const source=String(value||'').replace(/\r/g,' ').trim();
+  if(!source)return'';
+  const parts=[];
+  const re=/“([^”]+)”/g;
+  let match;
+  while((match=re.exec(source))){
+    const spoken=String(match[1]||'').replace(/\s+/g,' ').trim();
+    if(spoken)parts.push(spoken);
+  }
+  return parts.join(' ').trim();
+}
 function dsCleanSpokenText(value){
-  let s=String(value||'').replace(/\r/g,' ').trim();
-  if(!s)return'';
-  const patterns=[
-    /（[^（）]*）/g,/\([^()]*\)/g,/【[^【】]*】/g,/\[[^\[\]]*\]/g,
-    /\{[^{}]*\}/g,/〔[^〔〕]*〕/g,/〈[^〈〉]*〉/g,/《[^《》]*》/g
-  ];
-  for(let round=0;round<6;round++)for(const re of patterns)s=s.replace(re,' ');
-  s=s.replace(/\*[^*]*\*/g,' ');
-  s=s.replace(/^\s*(旁白|系统|system|narrator)\s*[:：]\s*/i,'');
-  return s.replace(/\s+/g,' ').trim();
+  return dsExtractChineseQuotedSpeech(value);
 }
 function dsVoiceId(cfg){
   const routeId=('')||'';
@@ -1226,7 +1279,7 @@ function dsTtsSettingsHtml(){
   return `<div class="panel form">
     <div class="panel-title">角色语音接入 TTS</div>
     <label class="row"><input id="ttsEnabled" type="checkbox" style="width:auto" ${t.enabled?'checked':''}>开启角色回复语音</label>
-    <p class="tts-note">关闭时完全不调用语音 API。开启后会先完成每条角色语音，再显示文字消息；失败会提示并保留文字。不会自动播放。旁白和任何括号内内容不会朗读。</p>
+    <p class="tts-note">关闭时完全不调用语音 API。开启后会先完成每条角色语音，再显示文字消息；失败会提示并保留文字。不会自动播放。旁白、动作和括号内容会原样显示；TTS只读取中文引号“”里的角色台词。</p>
     <label>服务商<select id="ttsProvider">
       <option value="minimax" ${t.provider==='minimax'?'selected':''}>MiniMax TTS</option>
       <option value="elevenlabs" ${t.provider==='elevenlabs'?'selected':''}>ElevenLabs TTS</option>
@@ -1373,7 +1426,7 @@ async function testTts(){
     state.settings.tts=cfg;
     dsSaveSharedTts(cfg);
     box.textContent='正在生成测试语音……';
-    const voice=await dsGenerateVerifiedVoice('你好，这是角色语音接入测试。',true);
+    const voice=await dsGenerateVerifiedVoice('“你好，这是角色语音接入测试。”',true);
     if(!voice?.audioKey||voice.browserDecoded!==true||!(Number(voice.ttsDuration)>0)){
       throw new Error('音频没有通过浏览器实际解码检查');
     }
@@ -1426,7 +1479,9 @@ async function sendTalk(prefill=''){
   }
 
   reply=String(reply||'……').trim().slice(0,1800);
-  const replyParts=splitRoleReply(reply);
+  const replyParts=splitRoleReply(reply).map(part=>
+    source==='api'?dsEnsureChineseQuotedRoleMessage(part):part
+  );
   const prepared=[];
   const ttsCfg=dsTtsConfig();
 
@@ -1476,8 +1531,8 @@ function apiKey(){return state.settings.api.rememberKey?(localStorage.getItem('d
 function chatEndpoint(base){let b=(base||'').trim().replace(/\/+$/,'');if(/\/chat\/completions$/i.test(b))return b;if(/\/v1$/i.test(b))return b+'/chat/completions';return b+'/chat/completions'}
 function modelEndpoint(base){let b=(base||'').trim().replace(/\/+$/,'');if(/\/chat\/completions$/i.test(b))b=b.replace(/\/chat\/completions$/i,'');if(!/\/v1$/i.test(b)&&!/\/models$/i.test(b))return b+'/models';return /\/models$/i.test(b)?b:b+'/models'}
 const REFERENCE_REPLY_STYLE=`【角色回复风格与形式｜直接参考指定版本｜高于内置世界书】
-规则：角色可以根据当前语境自然回复一句或多句，不限制必须只有一句。每一句都必须是独立、完整、自然的角色表达，并使用明确的句末标点结束；应用会把每一句拆成单独的角色回复框，禁止为了塞进同一个框而用大量逗号强行连成长句。
-可以在某一句中加入一段简短的括号动作、神态、停顿、当下心理或状态描写，例如“（停了一下）我知道。”。括号描写必须属于角色本人，并和紧随的那一句台词视为同一个回复框；不得描写用户的动作或心理，不得使用全知视角，不得连续堆叠多个括号，也不得写成长篇旁白。
+规则：角色可以根据当前语境自然回复一句或多句，不限制必须只有一句。每一句角色真正说出口的话都必须完整放在中文双引号“”内，并使用明确句末标点；不得使用英文引号、日式引号或完全省略引号。应用会按每组中文引号拆成独立角色回复框。
+可以在台词前后加入简短的括号动作、神态、停顿、当下心理或状态描写，但括号描写必须放在中文引号之外并原样保留，例如：（停了一下）“我知道。”。不得为了语音删除旁白、动作或括号内容；TTS只读取中文引号内部的角色台词。括号描写必须属于角色本人，不得描写用户的动作或心理，不得使用全知视角，不得连续堆叠多个括号，也不得写成长篇旁白。
 不冒充用户，不默认暧昧或亲密，不讨好，不制造离线焦虑。保持当前人设、说话方式、世界观和关系，优先自然真实。不要加入系统说明、Markdown、列表、教程式分析或总结式收尾。外层若要求严格 JSON，把完整回复放进 reply 字段，应用会按句末标点拆分成多个独立气泡。`;
 const BUILTIN_CHAT_WORLDBOOK=`【内置世界书｜位于指定回复风格与形式之下｜活人感补充】
 本世界书只补充角色的理解方式、生活感、关系连续性与独立性，不改变上方指定版本的回复形式。与“角色回复风格与形式”发生冲突时，以其为准。
@@ -1535,8 +1590,8 @@ ${recent}
 ${state.settings.api.customPrompt}
 附加指令只能补充内容，不能覆盖当前人设、说话方式、世界观、关系设定、指定回复形式或内置世界书。`:''}
 
-【纯聊天模式最终限制】无论附加指令怎样描述，都不要把回复写成网页功能、系统玩法或物品交互；只进行当前聊天室中的自然文字对话。`}
-function visualSystemPrompt(){ensureVisualState();const ps=state.visuals.portraits.filter(x=>x.hasImage).map(x=>`${x.id}｜${x.name}｜${x.description}`).join('\n')||'无可用人物半身图';const bs=state.visuals.backgrounds.filter(x=>x.hasImage).map(x=>`${x.id}｜${x.name}｜${x.description}`).join('\n')||'无可用背景图';const meta=state.visuals.switchMeta;return `${systemPrompt()}\n\n本次输出格式规则优先级最高：只返回一个严格 JSON 对象，不要 markdown，不要解释。格式：{"reply":"一至多句自然的角色回复，每句使用明确句末标点，可含简短角色动作或心理括号描写","status_text":"右上角角色状态，4到12个中文字符","mood":"当前情绪短词","activity":"当前动作或状态短语","portrait_id":"人物半身图ID或KEEP","portrait_change":false,"background_id":"背景图ID或KEEP","background_change":false,"scene_changed":false}。\n状态规则：status_text 必须根据当前对话、角色刚才的回复和互动即时判断，例如“有些迟疑 · 看着你”“心情放松 · 正在聊天”。不要写角色名字，不要写系统说明。\n表情规则：根据角色此刻真实情绪判断。只有现有表情明显不合适、情绪发生可见变化时，portrait_change 才能为 true；否则 portrait_id 填 KEEP。可以比背景更频繁，但不要为了变化而变化。\n背景规则非常严格：情绪变化绝不等于场景变化。只有物理地点、明确时间段、天气或明确场景事件确实改变时，scene_changed 和 background_change 才能为 true。普通聊天、语气变化、害羞、难过、开心都必须保持当前背景。背景不得连续切换；不确定时一律 KEEP。\n可用人物半身图：\n${ps}\n可用背景图：\n${bs}\n当前人物半身图：${state.visuals.currentPortrait}\n当前背景图：${state.visuals.currentBackground}\n当前右上角状态：${state.status.display||state.status.mood+' · '+state.status.activity}\n视觉判断轮次：${meta.turn}；上次背景切换轮次：${meta.lastBackgroundTurn}`}
+【纯聊天模式最终限制】无论附加指令怎样描述，都不要把回复写成网页功能、系统玩法或物品交互；只进行当前聊天室中的自然文字对话。角色真正说出口的每句话必须放在中文引号“”内；动作、神态、心理和括号内容可以保留，但必须放在引号外。`}
+function visualSystemPrompt(){ensureVisualState();const ps=state.visuals.portraits.filter(x=>x.hasImage).map(x=>`${x.id}｜${x.name}｜${x.description}`).join('\n')||'无可用人物半身图';const bs=state.visuals.backgrounds.filter(x=>x.hasImage).map(x=>`${x.id}｜${x.name}｜${x.description}`).join('\n')||'无可用背景图';const meta=state.visuals.switchMeta;return `${systemPrompt()}\n\n本次输出格式规则优先级最高：只返回一个严格 JSON 对象，不要 markdown，不要解释。格式：{"reply":"（动作可放在中文引号外）“一至多句自然的角色回复；每句说出口的话必须完整放在中文引号内。”","status_text":"右上角角色状态，4到12个中文字符","mood":"当前情绪短词","activity":"当前动作或状态短语","portrait_id":"人物半身图ID或KEEP","portrait_change":false,"background_id":"背景图ID或KEEP","background_change":false,"scene_changed":false}。\n状态规则：status_text 必须根据当前对话、角色刚才的回复和互动即时判断，例如“有些迟疑 · 看着你”“心情放松 · 正在聊天”。不要写角色名字，不要写系统说明。\n表情规则：根据角色此刻真实情绪判断。只有现有表情明显不合适、情绪发生可见变化时，portrait_change 才能为 true；否则 portrait_id 填 KEEP。可以比背景更频繁，但不要为了变化而变化。\n背景规则非常严格：情绪变化绝不等于场景变化。只有物理地点、明确时间段、天气或明确场景事件确实改变时，scene_changed 和 background_change 才能为 true。普通聊天、语气变化、害羞、难过、开心都必须保持当前背景。背景不得连续切换；不确定时一律 KEEP。\n可用人物半身图：\n${ps}\n可用背景图：\n${bs}\n当前人物半身图：${state.visuals.currentPortrait}\n当前背景图：${state.visuals.currentBackground}\n当前右上角状态：${state.status.display||state.status.mood+' · '+state.status.activity}\n视觉判断轮次：${meta.turn}；上次背景切换轮次：${meta.lastBackgroundTurn}`}
 async function onlineReplyBundle(text){
   const a=state.settings.api,key=apiKey();
   if(!a.baseUrl||!a.model)throw new Error('请填写 Base URL 和模型');
@@ -1999,11 +2054,7 @@ function applySnapshot(s){
   const audioKey=String(s.dialogue?.audioKey||'');
   const canPlay=!!(
     s.dialogue?.show&&
-    s.dialogue?.hasVoice&&
-    s.dialogue?.browserDecoded===true&&
-    s.dialogue?.verifiedPipeline==='heart_byte_tts_shared_verified_v1'&&
-    audioKey&&
-    dsTtsConfig().enabled
+    audioKey
   );
 
   voiceButton.hidden=!canPlay;
@@ -2013,6 +2064,26 @@ function applySnapshot(s){
   voiceButton.textContent='▶ 播放';
   voiceButton.classList.remove('playing','loading');
 }
+function applyCartridgeVoiceReady(voice){
+  if(!topView||!voice?.audioKey)return;
+  const dialogue=topView.querySelector('.cartridge-top-dialogue');
+  const button=dialogue?.querySelector('.cartridge-top-voice');
+  if(!dialogue||!button)return;
+
+  const currentName=dialogue.querySelector('b')?.textContent||'';
+  const currentText=dialogue.querySelector('.text')?.textContent||'';
+  if(voice.name&&currentName&&voice.name!==currentName)return;
+  if(voice.text&&currentText&&voice.text!==currentText)return;
+
+  button.hidden=false;
+  button.dataset.voiceKey=String(voice.audioKey);
+  button.dataset.ttsProvider=voice.ttsProvider||'';
+  button.dataset.ttsDuration=String(Number(voice.ttsDuration||0));
+  button.dataset.voiceSyncVersion=String(voice.voiceSyncVersion||2);
+  button.textContent='▶ 播放';
+  button.classList.remove('playing','loading');
+}
+
 async function openCard(html){
   if(typeof html!=='string'){
     const stored=await ensureCache();
@@ -2127,7 +2198,17 @@ function closeCard(update=true){if(topMount)topMount.remove();if(bottomMount)bot
 btn.addEventListener('click',()=>running?closeCard():showMenu());closeMenu.addEventListener('click',hideMenu);start.addEventListener('click',()=>openCard());importBtn.addEventListener('click',choose);
 eject.addEventListener('click',async()=>{if(!confirm('弹出并删除当前插入的卡带吗？卡带自己的路线存档仍保存在浏览器中。'))return;closeCard(false);await clearStored();await refreshMenu()});
 input.addEventListener('change',async()=>{const file=input.files&&input.files[0];if(!file)return;try{info.textContent='正在读取并写入大容量卡槽…';importBtn.disabled=true;start.disabled=true;const text=await file.text(),m=parseMeta(text);await saveStored(text,m);await refreshMenu();await openCard(text)}catch(err){console.error(err);alert('卡带导入失败：'+friendlyStorageError(err));await refreshMenu()}finally{importBtn.disabled=false;start.disabled=false;input.value=''}});
-window.addEventListener('message',e=>{const d=e.data||{};if(!running||e.source!==bottomFrame?.contentWindow)return;if(d.type==='HB_CARTRIDGE_TOP_SNAPSHOT')applySnapshot(d.snapshot);else if(d.type==='HB_CARTRIDGE_EXIT')closeCard()});
+window.addEventListener('message',e=>{
+  const data=e.data||{};
+  if(!running||e.source!==bottomFrame?.contentWindow)return;
+  if(data.type==='HB_CARTRIDGE_TOP_SNAPSHOT'){
+    applySnapshot(data.snapshot);
+  }else if(data.type==='HB_CARTRIDGE_VOICE_READY'){
+    applyCartridgeVoiceReady(data.voice);
+  }else if(data.type==='HB_CARTRIDGE_EXIT'){
+    closeCard();
+  }
+});
 document.addEventListener('click',e=>{if(!running)return;const dir=e.target.closest?.('[data-dir]')?.dataset.dir,key=e.target.closest?.('[data-key]')?.dataset.key;let commandKey=dir||key;if(e.target.closest?.('#startBtn'))commandKey='START';if(e.target.closest?.('#selectBtn'))commandKey='SELECT';if(!commandKey)return;e.preventDefault();e.stopPropagation();e.stopImmediatePropagation?.();bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'key',key:commandKey},'*')},true);
 window.addEventListener('keydown',e=>{if(!running)return;const map={ArrowUp:'up',ArrowDown:'down',ArrowLeft:'left',ArrowRight:'right',Enter:'A',Escape:'B'},key=map[e.key]||(e.key.toLowerCase()==='z'?'A':e.key.toLowerCase()==='x'?'B':'');if(!key)return;e.preventDefault();e.stopImmediatePropagation?.();bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'key',key},'*')},true);refreshMenu();
 })();
