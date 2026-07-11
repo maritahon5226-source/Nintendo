@@ -706,7 +706,84 @@ setInterval(updateClock,30000);if('serviceWorker' in navigator&&location.protoco
 .cartridge-top-view{position:absolute;inset:0;background:#17151e;overflow:hidden;color:#fff}.cartridge-top-view img{position:absolute;display:block}.cartridge-top-cover{inset:0;width:100%;height:100%;object-fit:cover}.cartridge-top-bg{inset:0;width:100%;height:100%;object-fit:cover}.cartridge-top-portrait{left:50%;bottom:0;width:min(69%,350px);height:94%;object-fit:contain;object-position:center bottom;transform:translateX(-50%);filter:drop-shadow(0 5px 4px #0007)}
 .cartridge-top-hud{position:absolute;left:7px;right:7px;top:7px;display:flex;justify-content:space-between;gap:7px;z-index:4;font:9px ui-monospace,SFMono-Regular,Menlo,monospace;text-shadow:1px 1px #000}.cartridge-top-hud span{max-width:58%;padding:4px 6px;border:1px solid #ffffff55;background:#17151ebf;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cartridge-top-dialogue{position:absolute;z-index:8;left:4%;right:4%;bottom:4%;max-height:46%;overflow:auto;padding:8px 11px;background:#f7f1ec;border:4px double #4d414f;color:#28232d;font:clamp(11px,2.7vw,15px)/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;box-shadow:4px 4px 0 #0005;white-space:pre-wrap;word-break:break-word;cursor:pointer;-webkit-overflow-scrolling:touch}.cartridge-top-dialogue.hidden{display:none}.cartridge-top-dialogue b{display:block;margin-bottom:3px}.cartridge-top-arrow{float:right;animation:hbArrow .7s steps(1) infinite}.cartridge-top-arrow.end{visibility:hidden}@keyframes hbArrow{50%{opacity:.25}}
-.cartridge-running-mark{position:absolute;z-index:49;left:5px;bottom:5px;padding:2px 5px;background:#17151ecc;border:1px solid #ffffff55;color:#fff;font:7px ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:none}
+.cartridge-route-select{position:absolute;inset:0;z-index:20;display:grid;grid-template-rows:auto minmax(0,1fr);background:radial-gradient(circle at 50% 18%,#49364a 0,#17151e 66%);color:#fff}.cartridge-route-select[hidden]{display:none!important}.cartridge-route-title{padding:7px 8px 2px;text-align:center;font:700 9px ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;text-shadow:1px 1px #000}.cartridge-route-track{
+  min-height:0;
+  display:flex;
+  flex-flow:row nowrap;
+  align-items:center;
+  justify-content:flex-start;
+  gap:8px;
+  overflow-x:auto;
+  overflow-y:hidden;
+  padding:5px 8px 10px;
+  scroll-snap-type:none;
+  -webkit-overflow-scrolling:touch;
+  touch-action:pan-x;
+  overscroll-behavior-x:contain;
+  scrollbar-width:none;
+  cursor:grab;
+  user-select:none;
+  -webkit-user-select:none
+}
+.cartridge-route-track.dragging{cursor:grabbing}
+.cartridge-route-track::-webkit-scrollbar{display:none}
+.cartridge-route-card{
+  position:relative;
+  flex:0 0 auto;
+  width:104px;
+  height:148px;
+  min-width:0;
+  min-height:0;
+  padding:0;
+  border:0;
+  background:#171923;
+  overflow:hidden;
+  cursor:pointer;
+  color:#fff;
+  box-shadow:0 4px 9px #0008
+}
+.cartridge-route-card::after{
+  content:"";
+  position:absolute;
+  inset:0;
+  outline:2px solid #e7cad9;
+  outline-offset:-2px;
+  pointer-events:none
+}
+.cartridge-route-card.active::after,.cartridge-route-card:focus-visible::after{
+  outline:3px solid #fff;
+  outline-offset:-3px
+}
+.cartridge-route-card img{
+  position:static;
+  width:100%;
+  height:100%;
+  display:block;
+  object-fit:contain;
+  object-position:center center;
+  background:#171923;
+  pointer-events:none
+}
+.cartridge-route-info{
+  position:absolute;
+  left:0;
+  right:0;
+  bottom:0;
+  width:100%;
+  padding:14px 5px 5px;
+  background:linear-gradient(transparent,#15111be8 48%,#15111bf5);
+  font:8px/1.35 ui-monospace,SFMono-Regular,Menlo,monospace;
+  text-align:left;
+  pointer-events:none
+}
+.cartridge-route-info b{
+  display:block;
+  font-size:9px;
+  white-space:nowrap;
+  overflow:hidden;
+  text-overflow:ellipsis
+}
+.cartridge-route-info small{display:none}.cartridge-route-hint{position:absolute;left:50%;bottom:2px;transform:translateX(-50%);font:7px ui-monospace,SFMono-Regular,Menlo,monospace;color:#fff9;white-space:nowrap;pointer-events:none}.cartridge-running-mark{position:absolute;z-index:49;left:5px;bottom:5px;padding:2px 5px;background:#17151ecc;border:1px solid #ffffff55;color:#fff;font:7px ui-monospace,SFMono-Regular,Menlo,monospace;pointer-events:none}
 </style>
 <button id="cartridgeSlotBtn" type="button">▣ 插入卡带</button>
 <div id="cartridgeMenu" class="hidden"><div class="cartridge-menu"><h3>GAME CARTRIDGE SLOT · LARGE</h3><p id="cartridgeInfo">尚未插入卡带。请选择双屏嵌入式 HTML 卡带。</p><div class="stack"><button id="cartridgeStartBtn" type="button" hidden>启动已插入卡带</button><button id="cartridgeImportBtn" type="button">选择卡带 HTML</button><button id="cartridgeEjectBtn" class="danger" type="button" hidden>弹出并删除卡带</button><button id="cartridgeMenuCloseBtn" type="button">关闭</button></div></div></div>
@@ -732,10 +809,60 @@ async function clearStored(){try{await dbDelete()}catch(e){console.warn(e)}try{l
 async function refreshMenu(){const {html,meta}=await ensureCache();if(html){info.textContent='已插入：'+(meta?.title||'乙女卡带')+'。卡带已储存在大容量卡槽中，启动后会显示在原有上下屏幕里。';start.hidden=false;eject.hidden=false;if(!running)btn.textContent='▣ 卡带已插入'}else{info.textContent='尚未插入卡带。请选择双屏嵌入式 HTML 卡带。';start.hidden=true;eject.hidden=true;if(!running)btn.textContent='▣ 插入卡带'}}
 async function showMenu(){if(running)return;await refreshMenu();menu.classList.remove('hidden')}function hideMenu(){menu.classList.add('hidden')}
 function injectBottom(html){const boot=`<script>window.__HB_EMBED_PANEL__='bottom';<\/script>`;return html.replace(/<head([^>]*)>/i,`<head$1>${boot}`)}
-function createTopMount(){const mount=document.createElement('div');mount.className='cartridge-screen-mount';mount.innerHTML=`<div class="cartridge-top-view"><img class="cartridge-top-cover" alt=""><img class="cartridge-top-bg" alt="" hidden><img class="cartridge-top-portrait" alt="" hidden><div class="cartridge-top-hud"><span class="route"></span><span class="status"></span></div><div class="cartridge-top-dialogue hidden"><b></b><span class="text"></span><span class="cartridge-top-arrow">▼</span></div></div><span class="cartridge-running-mark">CARTRIDGE</span>`;topScreen.appendChild(mount);return mount}
+function createTopMount(){const mount=document.createElement('div');mount.className='cartridge-screen-mount';mount.innerHTML=`<div class="cartridge-top-view"><img class="cartridge-top-cover" alt=""><img class="cartridge-top-bg" alt="" hidden><img class="cartridge-top-portrait" alt="" hidden><div class="cartridge-route-select" hidden><div class="cartridge-route-title">左右滑动 · 点击封面选择攻略男主</div><div class="cartridge-route-track"></div><div class="cartridge-route-hint">SWIPE ◀︎　▶︎ TAP TO SELECT</div></div><div class="cartridge-top-hud"><span class="route"></span><span class="status"></span></div><div class="cartridge-top-dialogue hidden"><b></b><span class="text"></span><span class="cartridge-top-arrow">▼</span></div></div><span class="cartridge-running-mark">CARTRIDGE</span>`;topScreen.appendChild(mount);return mount}
 function createBottomMount(html){const mount=document.createElement('div');mount.className='cartridge-screen-mount';const frame=document.createElement('iframe');frame.className='cartridge-bottom-frame';frame.title='卡带下屏';frame.setAttribute('allow','clipboard-read; clipboard-write');frame.srcdoc=injectBottom(html);mount.appendChild(frame);const mark=document.createElement('span');mark.className='cartridge-running-mark';mark.textContent='CARTRIDGE';mount.appendChild(mark);bottomScreen.appendChild(mount);return{mount,frame}}
-function applySnapshot(s){if(!topView||!s)return;const cover=topView.querySelector('.cartridge-top-cover'),bg=topView.querySelector('.cartridge-top-bg'),portrait=topView.querySelector('.cartridge-top-portrait');if(s.mode==='cover'){cover.src=s.coverSrc||'';cover.hidden=false;bg.hidden=true;portrait.hidden=true}else{bg.src=s.bgSrc||'';portrait.src=s.portraitSrc||'';cover.hidden=true;bg.hidden=false;portrait.hidden=false}topView.querySelector('.route').textContent=s.routeChip||'';topView.querySelector('.status').textContent=s.statusChip||'';const d=topView.querySelector('.cartridge-top-dialogue');d.classList.toggle('hidden',!s.dialogue?.show);d.querySelector('b').textContent=s.dialogue?.name||'';d.querySelector('.text').textContent=s.dialogue?.text||'';d.querySelector('.cartridge-top-arrow').classList.toggle('end',!s.dialogue?.hasMore)}
-async function openCard(html){if(typeof html!=='string'){const stored=await ensureCache();html=stored.html}if(!html){await showMenu();return}try{parseMeta(html)}catch(e){alert(e.message||'卡带无法启动');return}closeCard(false);topMount=createTopMount();topView=topMount.querySelector('.cartridge-top-view');const b=createBottomMount(html);bottomMount=b.mount;bottomFrame=b.frame;running=true;hideMenu();btn.textContent='■ 退出卡带';btn.classList.add('running');topView.querySelector('.cartridge-top-dialogue').addEventListener('click',()=>bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'advanceDialogue'},'*'));bottomFrame.addEventListener('load',()=>setTimeout(()=>bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'syncTop'},'*'),80),{once:true})}
+function escapeCardText(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+
+function fitHostRouteCards(track){
+  if(!track)return;
+  const usableH=Math.max(120,Math.min(205,track.clientHeight-12));
+  track.querySelectorAll('.cartridge-route-card').forEach(card=>{
+    const img=card.querySelector('img');if(!img)return;
+    const apply=()=>{
+      const ratio=(img.naturalWidth>0&&img.naturalHeight>0)?img.naturalWidth/img.naturalHeight:.704;
+      const h=usableH,w=Math.max(76,Math.min(160,Math.round(h*ratio)));
+      card.style.height=h+'px';card.style.width=w+'px';card.style.flexBasis=w+'px';
+    };
+    if(img.complete)apply();else img.addEventListener('load',apply,{once:true});
+  });
+}
+function bindHostRouteTrack(track){
+  if(!track||track.dataset.freeRowBound==='1')return;
+  track.dataset.freeRowBound='1';
+  let active=false,id=null,startX=0,startY=0,startScroll=0,moved=false,horizontal=false;
+  const begin=(x,y,pid)=>{active=true;id=pid;startX=x;startY=y;startScroll=track.scrollLeft;moved=false;horizontal=false;track.classList.add('dragging')};
+  const move=(x,y,e)=>{if(!active)return;const dx=x-startX,dy=y-startY;if(!horizontal&&Math.abs(dx)>5&&Math.abs(dx)>Math.abs(dy))horizontal=true;if(!horizontal)return;moved=true;track.scrollLeft=startScroll-dx;if(e?.cancelable)e.preventDefault()};
+  const end=()=>{if(!active)return;active=false;id=null;track.classList.remove('dragging');if(moved){topView.__routeSwipeLockUntil=Date.now()+450}};
+  if(window.PointerEvent){
+    track.addEventListener('pointerdown',e=>{if(e.pointerType==='mouse'&&e.button!==0)return;begin(e.clientX,e.clientY,e.pointerId);try{track.setPointerCapture(e.pointerId)}catch(_){}});
+    track.addEventListener('pointermove',e=>{if(active&&id===e.pointerId)move(e.clientX,e.clientY,e)},{passive:false});
+    track.addEventListener('pointerup',e=>{if(id===e.pointerId)end()});
+    track.addEventListener('pointercancel',end);
+  }else{
+    track.addEventListener('touchstart',e=>{if(e.touches.length===1)begin(e.touches[0].clientX,e.touches[0].clientY,'touch')},{passive:true});
+    track.addEventListener('touchmove',e=>{if(active&&e.touches.length===1)move(e.touches[0].clientX,e.touches[0].clientY,e)},{passive:false});
+    track.addEventListener('touchend',end,{passive:true});
+    track.addEventListener('touchcancel',end,{passive:true});
+  }
+  fitHostRouteCards(track);
+}
+function renderRouteSelector(s){
+  if(!topView)return;
+  const select=topView.querySelector('.cartridge-route-select'),track=select.querySelector('.cartridge-route-track');
+  const routes=Array.isArray(s.routes)?s.routes:[],selected=s.selectedRouteId||routes[0]?.id||'';
+  const sig=routes.map(r=>r.id).join('|');
+  if(track.dataset.sig!==sig){
+    track.innerHTML=routes.map(r=>`<button type="button" class="cartridge-route-card ${r.id===selected?'active':''}" data-route-id="${escapeCardText(r.id)}" aria-label="选择 ${escapeCardText(r.name)}"><img src="${r.coverSrc||''}" alt="${escapeCardText(r.name)}"><span class="cartridge-route-info"><b>${escapeCardText(r.name)} · ${escapeCardText(r.age)}</b><small>${escapeCardText(r.archetype)}<br>${escapeCardText(r.occupation)}</small></span></button>`).join('');
+    track.dataset.sig=sig;
+    requestAnimationFrame(()=>{bindHostRouteTrack(track);fitHostRouteCards(track);track.querySelector(`[data-route-id="${selected}"]`)?.scrollIntoView({behavior:'auto',inline:'nearest',block:'nearest'})});
+  }else{
+    track.querySelectorAll('.cartridge-route-card').forEach(card=>card.classList.toggle('active',card.dataset.routeId===selected));
+  }
+  bindHostRouteTrack(track);fitHostRouteCards(track);
+  select.hidden=false;
+}
+function applySnapshot(s){if(!topView||!s)return;const cover=topView.querySelector('.cartridge-top-cover'),bg=topView.querySelector('.cartridge-top-bg'),portrait=topView.querySelector('.cartridge-top-portrait'),select=topView.querySelector('.cartridge-route-select'),d=topView.querySelector('.cartridge-top-dialogue');if(s.mode==='routeSelect'){cover.hidden=true;bg.hidden=true;portrait.hidden=true;d.classList.add('hidden');renderRouteSelector(s);topView.querySelector('.route').textContent='选择攻略男主';topView.querySelector('.status').textContent='左右滑动 · 点击选择';return}select.hidden=true;if(s.mode==='cover'){cover.src=s.coverSrc||'';cover.style.objectFit='contain';cover.style.objectPosition='center top';cover.style.background='#171923';cover.hidden=false;bg.hidden=true;portrait.hidden=true}else{bg.src=s.bgSrc||'';portrait.src=s.portraitSrc||'';cover.hidden=true;bg.hidden=false;portrait.hidden=false}topView.querySelector('.route').textContent=s.routeChip||'';topView.querySelector('.status').textContent=s.statusChip||'';d.classList.toggle('hidden',!s.dialogue?.show);d.querySelector('b').textContent=s.dialogue?.name||'';d.querySelector('.text').textContent=s.dialogue?.text||'';d.querySelector('.cartridge-top-arrow').classList.toggle('end',!s.dialogue?.hasMore)}
+async function openCard(html){if(typeof html!=='string'){const stored=await ensureCache();html=stored.html}if(!html){await showMenu();return}try{parseMeta(html)}catch(e){alert(e.message||'卡带无法启动');return}closeCard(false);topMount=createTopMount();topView=topMount.querySelector('.cartridge-top-view');const b=createBottomMount(html);bottomMount=b.mount;bottomFrame=b.frame;running=true;hideMenu();btn.textContent='■ 退出卡带';btn.classList.add('running');topView.querySelector('.cartridge-top-dialogue').addEventListener('click',()=>bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'advanceDialogue'},'*'));topView.addEventListener('click',e=>{const card=e.target.closest?.('.cartridge-route-card');if(!card)return;if(Date.now()<(topView.__routeSwipeLockUntil||0))return;bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'selectRoute',routeId:card.dataset.routeId},'*')});let previewTimer=0;topView.addEventListener('scroll',e=>{const track=e.target.closest?.('.cartridge-route-track');if(!track)return;clearTimeout(previewTimer);previewTimer=setTimeout(()=>{const cards=[...track.querySelectorAll('.cartridge-route-card')];if(!cards.length)return;const center=track.getBoundingClientRect().left+track.clientWidth/2;let best=cards[0],dist=Infinity;for(const c of cards){const r=c.getBoundingClientRect(),d=Math.abs((r.left+r.right)/2-center);if(d<dist){dist=d;best=c}}cards.forEach(c=>c.classList.toggle('active',c===best));bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'previewRoute',routeId:best.dataset.routeId},'*')},140)},{capture:true,passive:true});bottomFrame.addEventListener('load',()=>setTimeout(()=>bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'syncTop'},'*'),80),{once:true})}
 function closeCard(update=true){if(topMount)topMount.remove();if(bottomMount)bottomMount.remove();topMount=bottomMount=bottomFrame=topView=null;running=false;btn.classList.remove('running');if(update)refreshMenu()}function choose(){input.value='';input.click()}
 btn.addEventListener('click',()=>running?closeCard():showMenu());closeMenu.addEventListener('click',hideMenu);start.addEventListener('click',()=>openCard());importBtn.addEventListener('click',choose);
 eject.addEventListener('click',async()=>{if(!confirm('弹出并删除当前插入的卡带吗？卡带自己的路线存档仍保存在浏览器中。'))return;closeCard(false);await clearStored();await refreshMenu()});
