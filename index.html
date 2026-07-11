@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · API双参数＋TTS语音接入版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · TTS浏览器实际解码确认版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -307,6 +307,10 @@ button{max-width:100%}
 .tts-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px}
 @media(max-width:560px){.tts-grid{grid-template-columns:1fr}}
 
+
+.dialogue{padding-bottom:37px!important}
+.dialogue-voice-btn{position:absolute;left:9px;bottom:6px;z-index:6;margin:0!important;min-height:23px}
+
 </style>
 </head>
 <body>
@@ -331,7 +335,7 @@ button{max-width:100%}
         </div>
         <div class="hud"><span id="timeChip" class="chip">FRI 13:00</span><span id="moodChip" class="chip">尚未载入</span></div>
         <div id="thought" class="thought"></div>
-        <div id="dialogue" class="dialogue" role="button" tabindex="0" aria-live="polite" aria-label="点击查看下一句或关闭对白"><div id="dialogueName" class="name">角色</div><span id="dialogueText"></span><span id="dialogueCursor" class="cursor" aria-hidden="true">▼</span></div>
+        <div id="dialogue" class="dialogue" role="button" tabindex="0" aria-live="polite" aria-label="点击查看下一句或关闭对白"><div id="dialogueName" class="name">角色</div><span id="dialogueText"></span><button id="dialogueVoiceBtn" type="button" class="voice-play-btn dialogue-voice-btn" data-tts-action="play" hidden>▶ 播放</button><span id="dialogueCursor" class="cursor" aria-hidden="true">▼</span></div>
         <div id="flash" class="flash"></div>
         <div id="bootLayer" class="boot-layer">
           <div><div class="boot-logo">DUAL//SOUL</div><div class="boot-sub">ONE PERSON · ONE SAVE<br>正在读取角色存档……</div><div class="boot-progress"><i></i></div></div>
@@ -372,7 +376,7 @@ button{max-width:100%}
 'use strict';
 const VERSION=4, STORAGE_KEY='dual_soul_complete_save_v3', SESSION_KEY='dual_soul_api_key_session', TEXT_SESSION_KEY='dual_soul_text_api_key_session', IMAGE_SESSION_KEY='dual_soul_image_api_key_session';
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const els={top:$('#topScreen'),scene:$('#scene'),weather:$('#weatherFx'),char:$('#character'),avatar:$('#customAvatar'),customBg:$('#customBackground'),time:$('#timeChip'),mood:$('#moodChip'),thought:$('#thought'),dialogue:$('#dialogue'),dialogueName:$('#dialogueName'),dialogueText:$('#dialogueText'),flash:$('#flash'),boot:$('#bootLayer'),title:$('#panelTitle'),content:$('#touchContent'),back:$('#backBtn'),miniClock:$('#miniClock'),toast:$('#toast'),importFile:$('#importFile'),avatarFile:$('#avatarFile'),visualAssetFile:$('#visualAssetFile'),visualReferenceFile:$('#visualReferenceFile'),generatingOverlay:$('#generatingOverlay'),generatingText:$('#generatingText')};
+const els={top:$('#topScreen'),scene:$('#scene'),weather:$('#weatherFx'),char:$('#character'),avatar:$('#customAvatar'),customBg:$('#customBackground'),time:$('#timeChip'),mood:$('#moodChip'),thought:$('#thought'),dialogue:$('#dialogue'),dialogueName:$('#dialogueName'),dialogueText:$('#dialogueText'),dialogueVoiceBtn:$('#dialogueVoiceBtn'),flash:$('#flash'),boot:$('#bootLayer'),title:$('#panelTitle'),content:$('#touchContent'),back:$('#backBtn'),miniClock:$('#miniClock'),toast:$('#toast'),importFile:$('#importFile'),avatarFile:$('#avatarFile'),visualAssetFile:$('#visualAssetFile'),visualReferenceFile:$('#visualReferenceFile'),generatingOverlay:$('#generatingOverlay'),generatingText:$('#generatingText')};
 const palettes={sage:{shell:'#d9d9d4',shell2:'#bdbdb7',accent:'#66766b',screen2:'#dfe7d8'},pink:{shell:'#e2d6d8',shell2:'#c8b4b8',accent:'#826a72',screen2:'#eadfe0'},blue:{shell:'#d4dce0',shell2:'#b0bec6',accent:'#607784',screen2:'#dae5e8'},black:{shell:'#4d4f4c',shell2:'#30322f',accent:'#7c887e',screen2:'#d8dfd6'},cream:{shell:'#e5dfcf',shell2:'#c8bea6',accent:'#7c745f',screen2:'#ebe7d9'}};
 const avatarPalettes={forest:{skin:'#e2bd9f',hair:'#343531',shirt:'#6c796f'},rose:{skin:'#e5bea3',hair:'#4a3337',shirt:'#9a737b'},night:{skin:'#c99578',hair:'#252a33',shirt:'#59647d'},sand:{skin:'#d5a984',hair:'#674d39',shirt:'#97856c'},mono:{skin:'#c7c7bd',hair:'#333532',shirt:'#767b75'}};
 function uid(){return Date.now().toString(36)+Math.random().toString(36).slice(2,7)}
@@ -457,11 +461,27 @@ function revealDialogueEntry(raw,{refreshChat=false}={}){
 }
 function renderDialogueQueue(){
   const queue=runtime.dialogueQueue||[];
-  if(!queue.length){els.dialogue.classList.remove('show','has-next');return}
+  if(!queue.length){
+    els.dialogue.classList.remove('show','has-next');
+    els.dialogueVoiceBtn.hidden=true;
+    els.dialogueVoiceBtn.dataset.voiceKey='';
+    return;
+  }
   runtime.dialogueIndex=clamp(Number(runtime.dialogueIndex)||0,0,queue.length-1);
   const entry=dialogueEntry(queue[runtime.dialogueIndex]);
+  const message=entry?.messageId?state.conversation.find(m=>m.id===entry.messageId):null;
   els.dialogueName.textContent=entry?.name||state?.character?.name||'角色';
   els.dialogueText.textContent=entry?.text||'……';
+
+  if(message?.audioKey&&dsTtsConfig().enabled){
+    els.dialogueVoiceBtn.hidden=false;
+    els.dialogueVoiceBtn.dataset.voiceKey=message.audioKey;
+    els.dialogueVoiceBtn.textContent='▶ 播放';
+  }else{
+    els.dialogueVoiceBtn.hidden=true;
+    els.dialogueVoiceBtn.dataset.voiceKey='';
+  }
+
   els.dialogue.scrollTop=0;
   els.dialogue.classList.add('show');
   els.dialogue.classList.toggle('has-next',runtime.dialogueIndex<queue.length-1);
@@ -503,7 +523,7 @@ function setDirty(){runtime.dirty=true;if(state?.settings?.autoSave)save(false)}
 function relationLabel(){const r=state.relation;const avg=(r.trust+r.comfort+r.familiarity)/3;return avg<12?'刚认识':avg<28?'逐渐熟悉':avg<50?'相处自然':avg<72?'很信任你':'重要的陪伴者'}
 function adjustRelation({trust=0,comfort=0,familiarity=0}={}){state.relation.trust=clamp(state.relation.trust+trust,0,100);state.relation.comfort=clamp(state.relation.comfort+comfort,0,100);state.relation.familiarity=clamp(state.relation.familiarity+familiarity,0,100);state.relation.label=relationLabel()}
 function addMemory(text,type='对话',important=false){if(!text)return;const last=state.memories[0];if(last&&last.text===text)return;state.memories.unshift({id:uid(),text:String(text).slice(0,220),type,important,ts:Date.now()});state.memories=state.memories.slice(0,180);setDirty()}
-function addMessage(role,text,source='local',options={}){const msg={id:uid(),role,text:String(text).slice(0,1800),source,ts:Date.now()};if(role==='assistant'&&options.revealed===false)msg.revealed=false;if(options.audioKey)msg.audioKey=options.audioKey;if(options.ttsStatus)msg.ttsStatus=options.ttsStatus;if(options.ttsProvider)msg.ttsProvider=options.ttsProvider;if(options.spokenText!==undefined)msg.spokenText=options.spokenText;if(options.ttsError)msg.ttsError=options.ttsError;state.conversation.push(msg);state.conversation=state.conversation.slice(-400);setDirty();return msg}
+function addMessage(role,text,source='local',options={}){const msg={id:uid(),role,text:String(text).slice(0,1800),source,ts:Date.now()};if(role==='assistant'&&options.revealed===false)msg.revealed=false;if(options.audioKey)msg.audioKey=options.audioKey;if(options.ttsStatus)msg.ttsStatus=options.ttsStatus;if(options.ttsProvider)msg.ttsProvider=options.ttsProvider;if(options.spokenText!==undefined)msg.spokenText=options.spokenText;if(options.ttsDuration!==undefined)msg.ttsDuration=Number(options.ttsDuration||0);if(options.ttsMime)msg.ttsMime=options.ttsMime;if(options.ttsSize!==undefined)msg.ttsSize=Number(options.ttsSize||0);if(options.browserDecoded===true)msg.browserDecoded=true;if(options.ttsError)msg.ttsError=options.ttsError;state.conversation.push(msg);state.conversation=state.conversation.slice(-400);setDirty();return msg}
 function deriveMemory(text){const keys=['我喜欢','我不喜欢','我最喜欢','我的生日','我叫','我住在','我来自','我害怕','请记住','记得我','我正在','我以后'];if(keys.some(k=>text.includes(k))||text.length>70)addMemory(`${state.player.name}说：${text.slice(0,120)}`,'对话',true)}
 function processReturn(){const old=state.lastVisit||Date.now(),now=Date.now(),mins=Math.floor((now-old)/60000);const oldDay=new Date(old);const days=Math.max(0,Math.floor((new Date(new Date().setHours(0,0,0,0))-new Date(oldDay.setHours(0,0,0,0)))/86400000));if(days>0)state.day+=days;let line='你把机器打开了。';if(mins<10)line='这么快就回来了。';else if(mins<120)line='刚才我还在这里。';else if(mins<720)line='你离开了一阵子。';else if(mins<1440)line='今天又见到了。';else if(days<4)line=`隔了${days}天。房间还是原来的样子。`;else line='有一阵子没见了。先坐下吧。';state.status.energy=clamp(state.status.energy+Math.min(18,Math.floor(mins/90)),0,100);state.lastVisit=now;naturalStatus();return line}
 function setPage(page,push=true){if(push&&runtime.page&&!['boot','title','setup'].includes(runtime.page))runtime.stack.push(runtime.page);runtime.page=page;runtime.selected=0;render();beep('click')}
@@ -587,8 +607,10 @@ function dsOpenTtsDb(){
   });
   return dsttsDbPromise;
 }
-async function dsStoreAudio(blob){
-  if(!blob||blob.size<8)throw new Error('语音接口没有返回有效音频');
+async function dsStoreAudio(blob,provider='TTS'){
+  blob=await dsNormalizeAudioBlob(blob,provider);
+  const verified=await dsValidatePlayableBlob(blob,provider);
+  blob=verified.blob;
   const key='tts_'+Date.now()+'_'+Math.random().toString(36).slice(2,9);
   const db=await dsOpenTtsDb();
   await new Promise((resolve,reject)=>{
@@ -599,7 +621,7 @@ async function dsStoreAudio(blob){
   });
   const url=URL.createObjectURL(blob);
   dsttsUrlCache.set(key,url);
-  return key;
+  return {audioKey:key,duration:verified.duration,mime:verified.mime,size:verified.size};
 }
 async function dsGetAudioBlob(key){
   if(!key)return null;
@@ -660,6 +682,128 @@ function dsBase64Blob(value,mime='audio/mpeg'){
   for(let i=0;i<raw.length;i++)out[i]=raw.charCodeAt(i);
   return new Blob([out],{type:mime});
 }
+
+function dsAscii(bytes,start,length){
+  let s='';
+  for(let i=start;i<Math.min(bytes.length,start+length);i++)s+=String.fromCharCode(bytes[i]);
+  return s;
+}
+function dsDetectAudioMime(bytes){
+  if(bytes.length>=12&&dsAscii(bytes,0,4)==='RIFF'&&dsAscii(bytes,8,4)==='WAVE')return'audio/wav';
+  if(bytes.length>=3&&dsAscii(bytes,0,3)==='ID3')return'audio/mpeg';
+  if(bytes.length>=2&&bytes[0]===0xff&&(bytes[1]&0xe0)===0xe0)return'audio/mpeg';
+  if(bytes.length>=4&&dsAscii(bytes,0,4)==='OggS')return'audio/ogg';
+  if(bytes.length>=4&&dsAscii(bytes,0,4)==='fLaC')return'audio/flac';
+  if(bytes.length>=4&&bytes[0]===0x1a&&bytes[1]===0x45&&bytes[2]===0xdf&&bytes[3]===0xa3)return'audio/webm';
+  if(bytes.length>=12&&dsAscii(bytes,4,4)==='ftyp')return'audio/mp4';
+  return'';
+}
+async function dsNormalizeAudioBlob(blob,provider='TTS'){
+  if(!blob)throw new Error(provider+' 没有返回音频');
+  const buffer=await blob.arrayBuffer();
+  if(buffer.byteLength<128)throw new Error(provider+' 返回的音频数据过短');
+  const bytes=new Uint8Array(buffer);
+  const type=String(blob.type||'').toLowerCase();
+  const head=new TextDecoder().decode(bytes.slice(0,Math.min(bytes.length,900))).trim();
+  if(
+    type.includes('json')||type.includes('text/')||type.includes('html')||
+    head.startsWith('{')||head.startsWith('[')||/^<!doctype|^<html/i.test(head)
+  ){
+    let message=head.slice(0,260);
+    try{
+      const data=JSON.parse(head);
+      message=data?.error?.message||data?.detail||data?.message||data?.error||message;
+    }catch(_){}
+    throw new Error(provider+' 返回的不是音频：'+message);
+  }
+  const mime=dsDetectAudioMime(bytes);
+  if(mime)return new Blob([buffer],{type:mime});
+  if(type.startsWith('audio/'))return new Blob([buffer],{type});
+  throw new Error(provider+' 请求成功，但返回内容不是可识别音频');
+}
+
+async function dsValidatePlayableBlob(blob,provider='TTS',timeoutMs=12000){
+  const url=URL.createObjectURL(blob);
+  const audio=new Audio();
+  audio.preload='auto';
+  audio.muted=true;
+  audio.src=url;
+
+  try{
+    const duration=await new Promise((resolve,reject)=>{
+      let done=false;
+      const cleanup=()=>{
+        clearTimeout(timer);
+        audio.removeEventListener('loadeddata',onReady);
+        audio.removeEventListener('canplay',onReady);
+        audio.removeEventListener('error',onError);
+        audio.removeEventListener('abort',onAbort);
+      };
+      const finish=(ok,value)=>{
+        if(done)return;
+        done=true;
+        cleanup();
+        ok?resolve(value):reject(value);
+      };
+      const verify=()=>{
+        const d=Number(audio.duration);
+        if(audio.readyState<2)return;
+        if(!Number.isFinite(d)||d<=0){
+          finish(false,new Error(provider+' 音频已经返回，但浏览器解析出的时长无效'));
+          return;
+        }
+        finish(true,d);
+      };
+      const onReady=()=>verify();
+      const onError=()=>finish(false,new Error(provider+' 返回的文件无法被当前浏览器解码播放'));
+      const onAbort=()=>finish(false,new Error(provider+' 音频解码被浏览器中止'));
+      const timer=setTimeout(
+        ()=>finish(false,new Error(provider+' 音频在 '+Math.round(timeoutMs/1000)+' 秒内未完成浏览器解码')),
+        timeoutMs
+      );
+      audio.addEventListener('loadeddata',onReady,{once:true});
+      audio.addEventListener('canplay',onReady,{once:true});
+      audio.addEventListener('error',onError,{once:true});
+      audio.addEventListener('abort',onAbort,{once:true});
+      audio.load();
+    });
+
+    return {
+      blob,
+      duration,
+      mime:blob.type||'application/octet-stream',
+      size:blob.size
+    };
+  }finally{
+    try{audio.pause()}catch(_){}
+    try{audio.removeAttribute('src');audio.load()}catch(_){}
+    URL.revokeObjectURL(url);
+  }
+}
+
+async function dsWaitAudioReady(audio,timeoutMs=9000){
+  if(audio.readyState>=2)return;
+  await new Promise((resolve,reject)=>{
+    let done=false;
+    const finish=(ok,error)=>{
+      if(done)return;
+      done=true;
+      clearTimeout(timer);
+      audio.removeEventListener('loadedmetadata',ready);
+      audio.removeEventListener('canplay',ready);
+      audio.removeEventListener('error',failed);
+      ok?resolve():reject(error||new Error('浏览器无法解码这段语音'));
+    };
+    const ready=()=>finish(true);
+    const failed=()=>finish(false,new Error('音频文件无法播放，可能是接口返回格式与设置不一致'));
+    const timer=setTimeout(()=>finish(false,new Error('音频载入超时')),timeoutMs);
+    audio.addEventListener('loadedmetadata',ready,{once:true});
+    audio.addEventListener('canplay',ready,{once:true});
+    audio.addEventListener('error',failed,{once:true});
+    audio.load();
+  });
+}
+
 function dsJsonPath(obj,path){
   return String(path||'').split('.').filter(Boolean).reduce((v,k)=>v&&v[k],obj);
 }
@@ -751,7 +895,7 @@ async function dsCallCamb(text,cfg,voiceId){
   const url=/\/apis\/tts-stream$/i.test(base)?base:base+'/apis/tts-stream';
   const response=await dsFetchTimeout(url,{
     method:'POST',
-    headers:{'x-api-key':key,'Content-Type':'application/json'},
+    headers:{'x-api-key':key,'Content-Type':'application/json','Accept':'audio/mpeg,audio/wav,application/octet-stream'},
     body:JSON.stringify({
       text,
       voice_id:voiceNum,
@@ -827,8 +971,17 @@ async function dsSynthesize(rawText,force=false){
   else if(cfg.provider==='openai')blob=await dsCallOpenAI(spokenText,cfg,voiceId);
   else if(cfg.provider==='custom')blob=await dsCallCustom(spokenText,cfg,voiceId);
   else blob=await dsCallMiniMax(spokenText,cfg,voiceId);
-  const audioKey=await dsStoreAudio(blob);
-  return{audioKey,spokenText,ttsProvider:cfg.provider,ttsStatus:'ready'};
+  const stored=await dsStoreAudio(blob,cfg.provider||'TTS');
+  return{
+    audioKey:stored.audioKey,
+    spokenText,
+    ttsProvider:cfg.provider,
+    ttsStatus:'ready',
+    ttsDuration:stored.duration,
+    ttsMime:stored.mime,
+    ttsSize:stored.size,
+    browserDecoded:true
+  };
 }
 async function dsPlayVoice(key,button,force=false){
   if(!key)return;
@@ -837,8 +990,11 @@ async function dsPlayVoice(key,button,force=false){
     if(button){button.classList.add('loading');button.textContent='载入中…'}
     const url=await dsGetAudioUrl(key);
     if(dsttsPlayer){try{dsttsPlayer.pause()}catch(_){}}
-    const audio=new Audio(url);
+    const audio=new Audio();
+    audio.preload='auto';
+    audio.src=url;
     dsttsPlayer=audio;
+    await dsWaitAudioReady(audio);
     if(button){button.classList.remove('loading');button.classList.add('playing');button.textContent='■ 播放中'}
     audio.onended=()=>{if(button){button.classList.remove('playing');button.textContent='▶ 重播'}};
     audio.onerror=()=>{if(button){button.classList.remove('playing');button.textContent='▶ 重播'}};
@@ -1170,8 +1326,12 @@ async function testTts(){
     dsSaveSharedTts(cfg);
     box.textContent='正在生成测试语音……';
     const voice=await dsSynthesize('你好，这是角色语音接入测试。',true);
-    if(!voice?.audioKey)throw new Error('没有生成可播放语音');
-    box.innerHTML=`测试成功｜${esc(cfg.provider)}<br><button type="button" class="voice-play-btn nav-item" data-tts-action="play" data-tts-force="1" data-voice-key="${esc(voice.audioKey)}">▶ 播放测试语音</button>`;
+    if(!voice?.audioKey||voice.browserDecoded!==true||!(Number(voice.ttsDuration)>0)){
+      throw new Error('音频没有通过浏览器实际解码检查');
+    }
+    const seconds=Number(voice.ttsDuration).toFixed(2);
+    const sizeKb=Math.max(1,Math.round(Number(voice.ttsSize||0)/1024));
+    box.innerHTML=`测试成功｜浏览器已实际解码<br>时长 ${seconds} 秒｜${esc(voice.ttsMime||'audio')}｜${sizeKb} KB<br><button type="button" class="voice-play-btn nav-item" data-tts-action="play" data-tts-force="1" data-voice-key="${esc(voice.audioKey)}">▶ 播放测试语音</button>`;
   }catch(e){
     box.textContent='测试失败：'+friendlyError(e);
   }
@@ -1222,7 +1382,7 @@ async function sendTalk(prefill=''){
   const prepared=[];
   const ttsCfg=dsTtsConfig();
 
-  for(const part of replyParts){
+  const prepareOne=async part=>{
     let meta={};
     if(ttsCfg.enabled){
       try{
@@ -1234,11 +1394,16 @@ async function sendTalk(prefill=''){
           ttsError:String(err?.message||err).slice(0,300),
           ttsProvider:ttsCfg.provider
         };
-        notify('语音接入失败：'+meta.ttsError+'。已显示原文字。');
       }
     }
-    prepared.push({part,meta});
+    return{part,meta};
+  };
+  for(let i=0;i<replyParts.length;i+=2){
+    const batch=await Promise.all(replyParts.slice(i,i+2).map(prepareOne));
+    prepared.push(...batch);
   }
+  const firstFailed=prepared.find(x=>x.meta?.ttsStatus==='failed');
+  if(firstFailed)notify('语音接入失败：'+firstFailed.meta.ttsError+'。已显示原文字。');
 
   runtime.typing=false;
   const replyMessages=prepared.map(x=>
@@ -1446,17 +1611,23 @@ document.addEventListener('click',e=>{
   e.preventDefault();
   e.stopPropagation();
   e.stopImmediatePropagation();
-  const action=target.dataset.ttsAction;
-  if(action==='play'){
-    dsPlayVoice(target.dataset.voiceKey,target,target.dataset.ttsForce==='1').catch(err=>notify('播放失败：'+friendlyError(err)));
-  }else if(action==='save')saveTtsSettings();
-  else if(action==='test')testTts();
+  onClick({target});
 },true);
 document.addEventListener('change',e=>{
   if(e.target?.id==='ttsProvider')dsTtsRefreshPanels();
 });
 
-function onClick(e){const t=e.target.closest('button,[data-go],[data-act],[data-memory-tab],[data-settings-tab],[data-studio-tab],[data-visual-generate],[data-visual-upload],[data-visual-select],[data-visual-clear],[data-remove-visual-reference],[data-shell],[data-avatar-palette],[data-delete-memory],[data-quick]');if(!t)return;if(t.dataset.ttsAction){const action=t.dataset.ttsAction;if(action==='play')dsPlayVoice(t.dataset.voiceKey,t,t.dataset.ttsForce==='1').catch(err=>notify('播放失败：'+friendlyError(err)));else if(action==='save')saveTtsSettings();else if(action==='test')testTts();return}if(t.dataset.go){setPage(t.dataset.go);return}if(t.dataset.quick){sendTalk(t.dataset.quick);return}if(t.dataset.memoryTab){runtime.memoryTab=t.dataset.memoryTab;renderMemories();return}if(t.dataset.settingsTab){runtime.settingsTab=t.dataset.settingsTab;renderSettings();return}if(t.dataset.studioTab){saveVisualMeta();runtime.studioTab=t.dataset.studioTab;renderStudio();return}if(t.dataset.visualGenerate){const [kind,id]=t.dataset.visualGenerate.split(':');generateVisual(kind,id);return}if(t.dataset.visualUpload){const [kind,id]=t.dataset.visualUpload.split(':');runtime.assetTarget={kind,id};els.visualAssetFile.click();return}if(t.dataset.visualSelect){const [kind,id]=t.dataset.visualSelect.split(':');if(kind==='portrait')state.visuals.currentPortrait=id;else state.visuals.currentBackground=id;save(false);renderVisualLayers();renderStudio();return}if(t.dataset.visualClear){const [kind,id]=t.dataset.visualClear.split(':');clearVisual(kind,id);return}if(t.dataset.removeVisualReference){const idx=Number(t.dataset.removeVisualReference),key=state.visuals.referenceKeys[idx];assetDelete(key).catch(()=>{});state.visuals.referenceKeys.splice(idx,1);save(false);renderStudio();return}if(t.dataset.shell){state.settings.shell=t.dataset.shell;applyTheme();save(false);renderSettings();return}if(t.dataset.avatarPalette){state.character.avatarPalette=t.dataset.avatarPalette;applyTheme();save(false);runtime.page==='setup'?renderSetup():renderSettings();return}if(t.dataset.deleteMemory){state.memories=state.memories.filter(m=>m.id!==t.dataset.deleteMemory);save(false);renderMemories();return}const a=t.dataset.act;if(!a)return;({continue:continueGame,'new-game':newGame,import:()=>els.importFile.click(),'setup-next':setupNext,'setup-prev':()=>{runtime.setupStep=Math.max(1,runtime.setupStep-1);renderSetup()},'finish-setup':finishSetup,'edit-profile':openProfileEditor,'close-modal':()=>t.closest('.modal')?.remove(),'save-profile':()=>saveProfileEditor(t),'save-general':saveGeneral,'save-api':saveApiSettings,'test-api':testApi,'fetch-models':fetchModels,'save-visual-meta':saveVisualMeta,'save-visual-profile':saveVisualProfile,'save-visual-api':saveVisualApiSettings,'test-text-visual-api':testVisualTextApi,'test-image-visual-api':testVisualImageApi,'upload-visual-reference':()=>els.visualReferenceFile.click(),'clear-visual-references':async()=>{for(const k of state.visuals.referenceKeys)await assetDelete(k).catch(()=>{});state.visuals.referenceKeys=[];save(false);renderStudio();notify('已清空参考图')},'manual-save':()=>save(true),'export-save':exportSave,'reset-save':resetSave,'upload-avatar':()=>els.avatarFile.click(),'remove-avatar':()=>{state.character.avatarImage='';save(false);applyTheme();renderSettings()},'status':openStatusModal}[a]?.())}
+function onClick(e){const t=e.target.closest('button,[data-go],[data-act],[data-memory-tab],[data-settings-tab],[data-studio-tab],[data-visual-generate],[data-visual-upload],[data-visual-select],[data-visual-clear],[data-remove-visual-reference],[data-shell],[data-avatar-palette],[data-delete-memory],[data-quick]');if(!t)return;if(t.dataset.ttsAction){
+  const now=Date.now();
+  if(runtime.lastTtsTarget===t&&now-Number(runtime.lastTtsAt||0)<650)return;
+  runtime.lastTtsTarget=t;
+  runtime.lastTtsAt=now;
+  const action=t.dataset.ttsAction;
+  if(action==='play')dsPlayVoice(t.dataset.voiceKey,t,t.dataset.ttsForce==='1').catch(err=>notify('播放失败：'+friendlyError(err)));
+  else if(action==='save')saveTtsSettings();
+  else if(action==='test')testTts();
+  return;
+}if(t.dataset.go){setPage(t.dataset.go);return}if(t.dataset.quick){sendTalk(t.dataset.quick);return}if(t.dataset.memoryTab){runtime.memoryTab=t.dataset.memoryTab;renderMemories();return}if(t.dataset.settingsTab){runtime.settingsTab=t.dataset.settingsTab;renderSettings();return}if(t.dataset.studioTab){saveVisualMeta();runtime.studioTab=t.dataset.studioTab;renderStudio();return}if(t.dataset.visualGenerate){const [kind,id]=t.dataset.visualGenerate.split(':');generateVisual(kind,id);return}if(t.dataset.visualUpload){const [kind,id]=t.dataset.visualUpload.split(':');runtime.assetTarget={kind,id};els.visualAssetFile.click();return}if(t.dataset.visualSelect){const [kind,id]=t.dataset.visualSelect.split(':');if(kind==='portrait')state.visuals.currentPortrait=id;else state.visuals.currentBackground=id;save(false);renderVisualLayers();renderStudio();return}if(t.dataset.visualClear){const [kind,id]=t.dataset.visualClear.split(':');clearVisual(kind,id);return}if(t.dataset.removeVisualReference){const idx=Number(t.dataset.removeVisualReference),key=state.visuals.referenceKeys[idx];assetDelete(key).catch(()=>{});state.visuals.referenceKeys.splice(idx,1);save(false);renderStudio();return}if(t.dataset.shell){state.settings.shell=t.dataset.shell;applyTheme();save(false);renderSettings();return}if(t.dataset.avatarPalette){state.character.avatarPalette=t.dataset.avatarPalette;applyTheme();save(false);runtime.page==='setup'?renderSetup():renderSettings();return}if(t.dataset.deleteMemory){state.memories=state.memories.filter(m=>m.id!==t.dataset.deleteMemory);save(false);renderMemories();return}const a=t.dataset.act;if(!a)return;({continue:continueGame,'new-game':newGame,import:()=>els.importFile.click(),'setup-next':setupNext,'setup-prev':()=>{runtime.setupStep=Math.max(1,runtime.setupStep-1);renderSetup()},'finish-setup':finishSetup,'edit-profile':openProfileEditor,'close-modal':()=>t.closest('.modal')?.remove(),'save-profile':()=>saveProfileEditor(t),'save-general':saveGeneral,'save-api':saveApiSettings,'test-api':testApi,'fetch-models':fetchModels,'save-visual-meta':saveVisualMeta,'save-visual-profile':saveVisualProfile,'save-visual-api':saveVisualApiSettings,'test-text-visual-api':testVisualTextApi,'test-image-visual-api':testVisualImageApi,'upload-visual-reference':()=>els.visualReferenceFile.click(),'clear-visual-references':async()=>{for(const k of state.visuals.referenceKeys)await assetDelete(k).catch(()=>{});state.visuals.referenceKeys=[];save(false);renderStudio();notify('已清空参考图')},'manual-save':()=>save(true),'export-save':exportSave,'reset-save':resetSave,'upload-avatar':()=>els.avatarFile.click(),'remove-avatar':()=>{state.character.avatarImage='';save(false);applyTheme();renderSettings()},'status':openStatusModal}[a]?.())}
 const UI_SELECTOR='button,[data-go],[data-act],[data-memory-tab],[data-settings-tab],[data-studio-tab],[data-visual-generate],[data-visual-upload],[data-visual-select],[data-visual-clear],[data-remove-visual-reference],[data-shell],[data-avatar-palette],[data-delete-memory],[data-quick]';
 function activateScreenControl(e){const target=e.target?.closest?.(UI_SELECTOR);if(!target||!els.content.contains(target))return;const now=Date.now();if(e.type==='click'&&runtime.lastUiTouchTarget===target&&now-runtime.lastUiTouchAt<700)return;if((e.type==='pointerup'&&e.pointerType!=='mouse')||e.type==='touchend'){runtime.lastUiTouchTarget=target;runtime.lastUiTouchAt=now;e.preventDefault?.();e.stopPropagation?.();onClick({target});if(target.id==='chatSend')sendTalk();return}onClick(e);if(target.id==='chatSend')sendTalk()}
 els.content.addEventListener('click',activateScreenControl);
@@ -1469,7 +1640,19 @@ $$('[data-dir]').forEach(b=>bindPress(b,()=>moveNav(b.dataset.dir)));
 $$('[data-key]').forEach(b=>bindPress(b,()=>{const k=b.dataset.key;if(k==='A')runtime.page==='talk'?($('#chatInput')?.focus()):pressA();if(k==='B')back()}));
 bindPress($('#startBtn'),()=>{if(state){save(true);flash()}else renderTitle()});
 bindPress($('#selectBtn'),()=>{if(state)openStatusModal();else notify('没有载入存档')});
-els.dialogue.addEventListener('click',e=>{if(e.target.closest?.('[data-tts-action]'))return;e.preventDefault();advanceDialogue()});
+let dsDialogueTouchAt=0;
+function dsAdvanceDialogueFromScreen(e){
+  if(e.target.closest?.('[data-tts-action]'))return;
+  if(e.type==='click'&&Date.now()-dsDialogueTouchAt<650)return;
+  if(e.type==='pointerup'&&e.pointerType!=='mouse'){
+    dsDialogueTouchAt=Date.now();
+    e.preventDefault();
+    e.stopPropagation();
+  }
+  advanceDialogue();
+}
+if(window.PointerEvent)els.dialogue.addEventListener('pointerup',dsAdvanceDialogueFromScreen,{passive:false});
+els.dialogue.addEventListener('click',dsAdvanceDialogueFromScreen);
 els.dialogue.addEventListener('keydown',e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();advanceDialogue()}});
 
 
