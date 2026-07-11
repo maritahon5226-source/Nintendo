@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · TTS浏览器实际解码确认版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · TTS测试与实际回复同链路版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -311,6 +311,30 @@ button{max-width:100%}
 .dialogue{padding-bottom:37px!important}
 .dialogue-voice-btn{position:absolute;left:9px;bottom:6px;z-index:6;margin:0!important;min-height:23px}
 
+
+.cartridge-top-dialogue{
+  padding-bottom:36px!important;
+}
+.cartridge-top-voice{
+  position:absolute;
+  left:9px;
+  bottom:6px;
+  z-index:10;
+  min-width:62px;
+  min-height:24px;
+  margin:0!important;
+  padding:4px 9px!important;
+  border:1px solid #7f747c;
+  background:#fffafc;
+  color:#302a2f;
+  font:700 8px/1.2 ui-monospace,SFMono-Regular,Menlo,monospace;
+  cursor:pointer;
+  box-shadow:1px 1px 0 #0003;
+}
+.cartridge-top-voice[hidden]{display:none!important}
+.cartridge-top-voice.playing{background:#ddd5da}
+.cartridge-top-voice.loading{opacity:.65;pointer-events:none}
+
 </style>
 </head>
 <body>
@@ -523,7 +547,7 @@ function setDirty(){runtime.dirty=true;if(state?.settings?.autoSave)save(false)}
 function relationLabel(){const r=state.relation;const avg=(r.trust+r.comfort+r.familiarity)/3;return avg<12?'刚认识':avg<28?'逐渐熟悉':avg<50?'相处自然':avg<72?'很信任你':'重要的陪伴者'}
 function adjustRelation({trust=0,comfort=0,familiarity=0}={}){state.relation.trust=clamp(state.relation.trust+trust,0,100);state.relation.comfort=clamp(state.relation.comfort+comfort,0,100);state.relation.familiarity=clamp(state.relation.familiarity+familiarity,0,100);state.relation.label=relationLabel()}
 function addMemory(text,type='对话',important=false){if(!text)return;const last=state.memories[0];if(last&&last.text===text)return;state.memories.unshift({id:uid(),text:String(text).slice(0,220),type,important,ts:Date.now()});state.memories=state.memories.slice(0,180);setDirty()}
-function addMessage(role,text,source='local',options={}){const msg={id:uid(),role,text:String(text).slice(0,1800),source,ts:Date.now()};if(role==='assistant'&&options.revealed===false)msg.revealed=false;if(options.audioKey)msg.audioKey=options.audioKey;if(options.ttsStatus)msg.ttsStatus=options.ttsStatus;if(options.ttsProvider)msg.ttsProvider=options.ttsProvider;if(options.spokenText!==undefined)msg.spokenText=options.spokenText;if(options.ttsDuration!==undefined)msg.ttsDuration=Number(options.ttsDuration||0);if(options.ttsMime)msg.ttsMime=options.ttsMime;if(options.ttsSize!==undefined)msg.ttsSize=Number(options.ttsSize||0);if(options.browserDecoded===true)msg.browserDecoded=true;if(options.ttsError)msg.ttsError=options.ttsError;state.conversation.push(msg);state.conversation=state.conversation.slice(-400);setDirty();return msg}
+function addMessage(role,text,source='local',options={}){const msg={id:uid(),role,text:String(text).slice(0,1800),source,ts:Date.now()};if(role==='assistant'&&options.revealed===false)msg.revealed=false;if(options.audioKey)msg.audioKey=options.audioKey;if(options.ttsStatus)msg.ttsStatus=options.ttsStatus;if(options.ttsProvider)msg.ttsProvider=options.ttsProvider;if(options.spokenText!==undefined)msg.spokenText=options.spokenText;if(options.ttsDuration!==undefined)msg.ttsDuration=Number(options.ttsDuration||0);if(options.ttsMime)msg.ttsMime=options.ttsMime;if(options.ttsSize!==undefined)msg.ttsSize=Number(options.ttsSize||0);if(options.browserDecoded===true)msg.browserDecoded=true;if(options.verifiedPipeline)msg.verifiedPipeline=options.verifiedPipeline;if(options.ttsError)msg.ttsError=options.ttsError;state.conversation.push(msg);state.conversation=state.conversation.slice(-400);setDirty();return msg}
 function deriveMemory(text){const keys=['我喜欢','我不喜欢','我最喜欢','我的生日','我叫','我住在','我来自','我害怕','请记住','记得我','我正在','我以后'];if(keys.some(k=>text.includes(k))||text.length>70)addMemory(`${state.player.name}说：${text.slice(0,120)}`,'对话',true)}
 function processReturn(){const old=state.lastVisit||Date.now(),now=Date.now(),mins=Math.floor((now-old)/60000);const oldDay=new Date(old);const days=Math.max(0,Math.floor((new Date(new Date().setHours(0,0,0,0))-new Date(oldDay.setHours(0,0,0,0)))/86400000));if(days>0)state.day+=days;let line='你把机器打开了。';if(mins<10)line='这么快就回来了。';else if(mins<120)line='刚才我还在这里。';else if(mins<720)line='你离开了一阵子。';else if(mins<1440)line='今天又见到了。';else if(days<4)line=`隔了${days}天。房间还是原来的样子。`;else line='有一阵子没见了。先坐下吧。';state.status.energy=clamp(state.status.energy+Math.min(18,Math.floor(mins/90)),0,100);state.lastVisit=now;naturalStatus();return line}
 function setPage(page,push=true){if(push&&runtime.page&&!['boot','title','setup'].includes(runtime.page))runtime.stack.push(runtime.page);runtime.page=page;runtime.selected=0;render();beep('click')}
@@ -1004,6 +1028,30 @@ async function dsPlayVoice(key,button,force=false){
     throw e;
   }
 }
+
+async function dsGenerateVerifiedVoice(rawText,force=false){
+  const voice=await dsSynthesize(rawText,force);
+  if(!voice)return null;
+  if(voice.ttsStatus==='skipped')return voice;
+  if(
+    !voice.audioKey||
+    voice.browserDecoded!==true||
+    !(Number(voice.ttsDuration)>0)||
+    !voice.ttsMime||
+    !(Number(voice.ttsSize)>0)
+  ){
+    throw new Error('语音未通过与测试语音相同的实际可播放验证');
+  }
+  return {
+    ...voice,
+    verifiedPipeline:'heart_byte_tts_shared_verified_v1'
+  };
+}
+async function dsPlayVerifiedVoice(key,button,force=false){
+  if(!key)throw new Error('没有可播放的语音编号');
+  return dsPlayVoice(key,button,force);
+}
+
 function dsVoiceButtonHtml(item){
   if(!dsTtsConfig().enabled)return'';
   if(item?.audioKey){
@@ -1325,7 +1373,7 @@ async function testTts(){
     state.settings.tts=cfg;
     dsSaveSharedTts(cfg);
     box.textContent='正在生成测试语音……';
-    const voice=await dsSynthesize('你好，这是角色语音接入测试。',true);
+    const voice=await dsGenerateVerifiedVoice('你好，这是角色语音接入测试。',true);
     if(!voice?.audioKey||voice.browserDecoded!==true||!(Number(voice.ttsDuration)>0)){
       throw new Error('音频没有通过浏览器实际解码检查');
     }
@@ -1386,7 +1434,7 @@ async function sendTalk(prefill=''){
     let meta={};
     if(ttsCfg.enabled){
       try{
-        const voice=await dsSynthesize(part);
+        const voice=await dsGenerateVerifiedVoice(part,false);
         if(voice)meta=voice;
       }catch(err){
         meta={
@@ -1623,7 +1671,7 @@ function onClick(e){const t=e.target.closest('button,[data-go],[data-act],[data-
   runtime.lastTtsTarget=t;
   runtime.lastTtsAt=now;
   const action=t.dataset.ttsAction;
-  if(action==='play')dsPlayVoice(t.dataset.voiceKey,t,t.dataset.ttsForce==='1').catch(err=>notify('播放失败：'+friendlyError(err)));
+  if(action==='play')dsPlayVerifiedVoice(t.dataset.voiceKey,t,t.dataset.ttsForce==='1').catch(err=>notify('播放失败：'+friendlyError(err)));
   else if(action==='save')saveTtsSettings();
   else if(action==='test')testTts();
   return;
@@ -1823,7 +1871,33 @@ async function clearStored(){try{await dbDelete()}catch(e){console.warn(e)}try{l
 async function refreshMenu(){const {html,meta}=await ensureCache();if(html){info.textContent='已插入：'+(meta?.title||'乙女卡带')+'。卡带已储存在大容量卡槽中，启动后会显示在原有上下屏幕里。';start.hidden=false;eject.hidden=false;if(!running)btn.textContent='▣ 卡带已插入'}else{info.textContent='尚未插入卡带。请选择双屏嵌入式 HTML 卡带。';start.hidden=true;eject.hidden=true;if(!running)btn.textContent='▣ 插入卡带'}}
 async function showMenu(){if(running)return;await refreshMenu();menu.classList.remove('hidden')}function hideMenu(){menu.classList.add('hidden')}
 function injectBottom(html){const boot=`<script>window.__HB_EMBED_PANEL__='bottom';<\/script>`;return html.replace(/<head([^>]*)>/i,`<head$1>${boot}`)}
-function createTopMount(){const mount=document.createElement('div');mount.className='cartridge-screen-mount';mount.innerHTML=`<div class="cartridge-top-view"><img class="cartridge-top-cover" alt=""><img class="cartridge-top-bg" alt="" hidden><img class="cartridge-top-portrait" alt="" hidden><div class="cartridge-route-select" hidden><div class="cartridge-route-title">左右滑动 · 点击封面选择攻略男主</div><div class="cartridge-route-track"></div><div class="cartridge-route-hint">SWIPE ◀︎　▶︎ TAP TO SELECT</div></div><div class="cartridge-top-hud"><span class="route"></span><span class="status"></span></div><div class="cartridge-top-dialogue hidden"><b></b><span class="text"></span><span class="cartridge-top-arrow">▼</span></div></div><span class="cartridge-running-mark">CARTRIDGE</span>`;topScreen.appendChild(mount);return mount}
+function createTopMount(){
+  const mount=document.createElement('div');
+  mount.className='cartridge-screen-mount';
+  mount.innerHTML=`<div class="cartridge-top-view">
+    <img class="cartridge-top-cover" alt="">
+    <img class="cartridge-top-bg" alt="" hidden>
+    <img class="cartridge-top-portrait" alt="" hidden>
+    <div class="cartridge-route-select" hidden>
+      <div class="cartridge-route-title">左右滑动 · 点击封面选择攻略男主</div>
+      <div class="cartridge-route-track"></div>
+      <div class="cartridge-route-hint">SWIPE ◀︎　▶︎ TAP TO SELECT</div>
+    </div>
+    <div class="cartridge-top-hud">
+      <span class="route"></span>
+      <span class="status"></span>
+    </div>
+    <div class="cartridge-top-dialogue hidden">
+      <b></b>
+      <span class="text"></span>
+      <button type="button" class="cartridge-top-voice" hidden>▶ 播放</button>
+      <span class="cartridge-top-arrow">▼</span>
+    </div>
+  </div>
+  <span class="cartridge-running-mark">CARTRIDGE</span>`;
+  topScreen.appendChild(mount);
+  return mount;
+}
 function createBottomMount(html){const mount=document.createElement('div');mount.className='cartridge-screen-mount';const frame=document.createElement('iframe');frame.className='cartridge-bottom-frame';frame.title='卡带下屏';frame.setAttribute('allow','clipboard-read; clipboard-write');frame.srcdoc=injectBottom(html);mount.appendChild(frame);const mark=document.createElement('span');mark.className='cartridge-running-mark';mark.textContent='CARTRIDGE';mount.appendChild(mark);bottomScreen.appendChild(mount);return{mount,frame}}
 function escapeCardText(s=''){return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
 
@@ -1875,8 +1949,180 @@ function renderRouteSelector(s){
   bindHostRouteTrack(track);fitHostRouteCards(track);
   select.hidden=false;
 }
-function applySnapshot(s){if(!topView||!s)return;const cover=topView.querySelector('.cartridge-top-cover'),bg=topView.querySelector('.cartridge-top-bg'),portrait=topView.querySelector('.cartridge-top-portrait'),select=topView.querySelector('.cartridge-route-select'),d=topView.querySelector('.cartridge-top-dialogue');if(s.mode==='routeSelect'){cover.hidden=true;bg.hidden=true;portrait.hidden=true;d.classList.add('hidden');renderRouteSelector(s);topView.querySelector('.route').textContent='选择攻略男主';topView.querySelector('.status').textContent='左右滑动 · 点击选择';return}select.hidden=true;if(s.mode==='cover'){cover.src=s.coverSrc||'';cover.style.objectFit='contain';cover.style.objectPosition='center top';cover.style.background='#171923';cover.hidden=false;bg.hidden=true;portrait.hidden=true}else{bg.src=s.bgSrc||'';portrait.src=s.portraitSrc||'';cover.hidden=true;bg.hidden=false;portrait.hidden=false}topView.querySelector('.route').textContent=s.routeChip||'';topView.querySelector('.status').textContent=s.statusChip||'';d.classList.toggle('hidden',!s.dialogue?.show);d.querySelector('b').textContent=s.dialogue?.name||'';d.querySelector('.text').textContent=s.dialogue?.text||'';d.querySelector('.cartridge-top-arrow').classList.toggle('end',!s.dialogue?.hasMore)}
-async function openCard(html){if(typeof html!=='string'){const stored=await ensureCache();html=stored.html}if(!html){await showMenu();return}try{parseMeta(html)}catch(e){alert(e.message||'卡带无法启动');return}closeCard(false);topMount=createTopMount();topView=topMount.querySelector('.cartridge-top-view');const b=createBottomMount(html);bottomMount=b.mount;bottomFrame=b.frame;running=true;hideMenu();btn.textContent='■ 退出卡带';btn.classList.add('running');topView.querySelector('.cartridge-top-dialogue').addEventListener('click',()=>bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'advanceDialogue'},'*'));topView.addEventListener('click',e=>{const card=e.target.closest?.('.cartridge-route-card');if(!card)return;if(Date.now()<(topView.__routeSwipeLockUntil||0))return;bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'selectRoute',routeId:card.dataset.routeId},'*')});let previewTimer=0;topView.addEventListener('scroll',e=>{const track=e.target.closest?.('.cartridge-route-track');if(!track)return;clearTimeout(previewTimer);previewTimer=setTimeout(()=>{const cards=[...track.querySelectorAll('.cartridge-route-card')];if(!cards.length)return;const center=track.getBoundingClientRect().left+track.clientWidth/2;let best=cards[0],dist=Infinity;for(const c of cards){const r=c.getBoundingClientRect(),d=Math.abs((r.left+r.right)/2-center);if(d<dist){dist=d;best=c}}cards.forEach(c=>c.classList.toggle('active',c===best));bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'previewRoute',routeId:best.dataset.routeId},'*')},140)},{capture:true,passive:true});bottomFrame.addEventListener('load',()=>setTimeout(()=>bottomFrame?.contentWindow?.postMessage({type:'HB_CARTRIDGE_COMMAND',command:'syncTop'},'*'),80),{once:true})}
+function applySnapshot(s){
+  if(!topView||!s)return;
+  const cover=topView.querySelector('.cartridge-top-cover');
+  const bg=topView.querySelector('.cartridge-top-bg');
+  const portrait=topView.querySelector('.cartridge-top-portrait');
+  const select=topView.querySelector('.cartridge-route-select');
+  const dialogue=topView.querySelector('.cartridge-top-dialogue');
+  const voiceButton=dialogue.querySelector('.cartridge-top-voice');
+
+  if(s.mode==='routeSelect'){
+    cover.hidden=true;
+    bg.hidden=true;
+    portrait.hidden=true;
+    dialogue.classList.add('hidden');
+    voiceButton.hidden=true;
+    voiceButton.dataset.voiceKey='';
+    renderRouteSelector(s);
+    topView.querySelector('.route').textContent='选择攻略男主';
+    topView.querySelector('.status').textContent='左右滑动 · 点击选择';
+    return;
+  }
+
+  select.hidden=true;
+  if(s.mode==='cover'){
+    cover.src=s.coverSrc||'';
+    cover.style.objectFit='contain';
+    cover.style.objectPosition='center top';
+    cover.style.background='#171923';
+    cover.hidden=false;
+    bg.hidden=true;
+    portrait.hidden=true;
+  }else{
+    bg.src=s.bgSrc||'';
+    portrait.src=s.portraitSrc||'';
+    cover.hidden=true;
+    bg.hidden=false;
+    portrait.hidden=false;
+  }
+
+  topView.querySelector('.route').textContent=s.routeChip||'';
+  topView.querySelector('.status').textContent=s.statusChip||'';
+  dialogue.classList.toggle('hidden',!s.dialogue?.show);
+  dialogue.querySelector('b').textContent=s.dialogue?.name||'';
+  dialogue.querySelector('.text').textContent=s.dialogue?.text||'';
+  dialogue.querySelector('.cartridge-top-arrow')
+    .classList.toggle('end',!s.dialogue?.hasMore);
+
+  const audioKey=String(s.dialogue?.audioKey||'');
+  const canPlay=!!(
+    s.dialogue?.show&&
+    s.dialogue?.hasVoice&&
+    s.dialogue?.browserDecoded===true&&
+    s.dialogue?.verifiedPipeline==='heart_byte_tts_shared_verified_v1'&&
+    audioKey&&
+    dsTtsConfig().enabled
+  );
+
+  voiceButton.hidden=!canPlay;
+  voiceButton.dataset.voiceKey=canPlay?audioKey:'';
+  voiceButton.dataset.ttsProvider=s.dialogue?.ttsProvider||'';
+  voiceButton.dataset.ttsDuration=String(Number(s.dialogue?.ttsDuration||0));
+  voiceButton.textContent='▶ 播放';
+  voiceButton.classList.remove('playing','loading');
+}
+async function openCard(html){
+  if(typeof html!=='string'){
+    const stored=await ensureCache();
+    html=stored.html;
+  }
+  if(!html){await showMenu();return}
+  try{parseMeta(html)}
+  catch(e){alert(e.message||'卡带无法启动');return}
+
+  closeCard(false);
+  topMount=createTopMount();
+  topView=topMount.querySelector('.cartridge-top-view');
+  const b=createBottomMount(html);
+  bottomMount=b.mount;
+  bottomFrame=b.frame;
+  running=true;
+  hideMenu();
+  btn.textContent='■ 退出卡带';
+  btn.classList.add('running');
+
+  const mirroredDialogue=topView.querySelector('.cartridge-top-dialogue');
+  let topDialogueTouchAt=0;
+
+  const handleMirroredDialogue=e=>{
+    const voiceButton=e.target.closest?.('.cartridge-top-voice');
+    if(voiceButton){
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+
+      const now=Date.now();
+      if(
+        voiceButton.__lastPlayAt&&
+        now-voiceButton.__lastPlayAt<650
+      )return;
+      voiceButton.__lastPlayAt=now;
+
+      const key=voiceButton.dataset.voiceKey;
+      if(!key)return;
+      dsPlayVerifiedVoice(key,voiceButton,false)
+        .catch(err=>notify('播放失败：'+friendlyError(err)));
+      return;
+    }
+
+    if(e.type==='click'&&Date.now()-topDialogueTouchAt<650)return;
+    if(e.type==='pointerup'&&e.pointerType!=='mouse'){
+      topDialogueTouchAt=Date.now();
+      e.preventDefault();
+      e.stopPropagation();
+    }
+
+    bottomFrame?.contentWindow?.postMessage({
+      type:'HB_CARTRIDGE_COMMAND',
+      command:'advanceDialogue'
+    },'*');
+  };
+
+  if(window.PointerEvent){
+    mirroredDialogue.addEventListener(
+      'pointerup',
+      handleMirroredDialogue,
+      {passive:false}
+    );
+  }
+  mirroredDialogue.addEventListener('click',handleMirroredDialogue);
+
+  topView.addEventListener('click',e=>{
+    const card=e.target.closest?.('.cartridge-route-card');
+    if(!card)return;
+    if(Date.now()<(topView.__routeSwipeLockUntil||0))return;
+    bottomFrame?.contentWindow?.postMessage({
+      type:'HB_CARTRIDGE_COMMAND',
+      command:'selectRoute',
+      routeId:card.dataset.routeId
+    },'*');
+  });
+
+  let previewTimer=0;
+  topView.addEventListener('scroll',e=>{
+    const track=e.target.closest?.('.cartridge-route-track');
+    if(!track)return;
+    clearTimeout(previewTimer);
+    previewTimer=setTimeout(()=>{
+      const cards=[...track.querySelectorAll('.cartridge-route-card')];
+      if(!cards.length)return;
+      const center=track.getBoundingClientRect().left+track.clientWidth/2;
+      let best=cards[0],dist=Infinity;
+      for(const c of cards){
+        const r=c.getBoundingClientRect();
+        const d=Math.abs((r.left+r.right)/2-center);
+        if(d<dist){dist=d;best=c}
+      }
+      cards.forEach(c=>c.classList.toggle('active',c===best));
+      bottomFrame?.contentWindow?.postMessage({
+        type:'HB_CARTRIDGE_COMMAND',
+        command:'previewRoute',
+        routeId:best.dataset.routeId
+      },'*');
+    },140);
+  },{capture:true,passive:true});
+
+  bottomFrame.addEventListener('load',()=>{
+    setTimeout(()=>{
+      bottomFrame?.contentWindow?.postMessage({
+        type:'HB_CARTRIDGE_COMMAND',
+        command:'syncTop'
+      },'*');
+    },80);
+  },{once:true});
+}
 function closeCard(update=true){if(topMount)topMount.remove();if(bottomMount)bottomMount.remove();topMount=bottomMount=bottomFrame=topView=null;running=false;btn.classList.remove('running');if(update)refreshMenu()}function choose(){input.value='';input.click()}
 btn.addEventListener('click',()=>running?closeCard():showMenu());closeMenu.addEventListener('click',hideMenu);start.addEventListener('click',()=>openCard());importBtn.addEventListener('click',choose);
 eject.addEventListener('click',async()=>{if(!confirm('弹出并删除当前插入的卡带吗？卡带自己的路线存档仍保存在浏览器中。'))return;closeCard(false);await clearStored();await refreshMenu()});
