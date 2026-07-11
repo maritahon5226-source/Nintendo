@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · 角色台词引号TTS与上屏即时播放版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · 上屏气泡紧凑播放修复版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -334,6 +334,93 @@ button{max-width:100%}
 .cartridge-top-voice[hidden]{display:none!important}
 .cartridge-top-voice.playing{background:#ddd5da}
 .cartridge-top-voice.loading{opacity:.65;pointer-events:none}
+
+
+/* 游戏机上屏镜像剧情框：去除 HTML 缩进空行，播放区不遮挡正文 */
+.cartridge-top-dialogue{
+  display:block;
+  min-height:0!important;
+  max-height:46%!important;
+  padding:7px 10px 7px!important;
+  white-space:normal!important;
+  overflow:auto!important;
+  line-height:1.42!important;
+}
+.cartridge-top-dialogue>b{
+  display:block!important;
+  margin:0 0 2px!important;
+  padding:0!important;
+  line-height:1.2!important;
+}
+.cartridge-top-dialogue>.text{
+  display:block!important;
+  margin:0!important;
+  padding:0!important;
+  white-space:pre-wrap!important;
+  text-indent:0!important;
+  line-height:1.42!important;
+}
+.cartridge-top-actions{
+  display:flex;
+  align-items:center;
+  justify-content:space-between;
+  gap:8px;
+  min-height:22px;
+  margin:5px 0 0;
+  padding:0;
+  white-space:normal;
+}
+.cartridge-top-voice{
+  position:static!important;
+  inset:auto!important;
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 auto;
+  min-width:62px;
+  min-height:22px!important;
+  margin:0!important;
+  padding:3px 8px!important;
+  touch-action:manipulation;
+  pointer-events:auto!important;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.cartridge-top-voice[hidden]{display:none!important}
+.cartridge-top-arrow{
+  float:none!important;
+  display:inline-block;
+  margin-left:auto;
+  flex:0 0 auto;
+}
+
+
+.dialogue{
+  min-height:0!important;
+  padding:6px 8px!important;
+  white-space:normal!important;
+}
+.dialogue .name{
+  display:block;
+  margin:0 0 2px!important;
+  line-height:1.2;
+}
+#dialogueText{
+  display:block;
+  margin:0;
+  padding:0;
+  white-space:pre-wrap;
+  text-indent:0;
+  line-height:1.4;
+}
+.dialogue-voice-btn{
+  position:static!important;
+  inset:auto!important;
+  margin:5px 4px 0 0!important;
+  min-height:22px!important;
+  vertical-align:middle;
+  touch-action:manipulation;
+}
 
 </style>
 </head>
@@ -1942,12 +2029,7 @@ function createTopMount(){
       <span class="route"></span>
       <span class="status"></span>
     </div>
-    <div class="cartridge-top-dialogue hidden">
-      <b></b>
-      <span class="text"></span>
-      <button type="button" class="cartridge-top-voice" hidden>▶ 播放</button>
-      <span class="cartridge-top-arrow">▼</span>
-    </div>
+    <div class="cartridge-top-dialogue hidden"><b></b><span class="text"></span><div class="cartridge-top-actions"><button type="button" class="cartridge-top-voice" hidden>▶ 播放</button><span class="cartridge-top-arrow">▼</span></div></div>
   </div>
   <span class="cartridge-running-mark">CARTRIDGE</span>`;
   topScreen.appendChild(mount);
@@ -2004,6 +2086,15 @@ function renderRouteSelector(s){
   bindHostRouteTrack(track);fitHostRouteCards(track);
   select.hidden=false;
 }
+
+function compactCartridgeDialogueText(value){
+  return String(value||'')
+    .replace(/\r/g,'')
+    .replace(/[ \t]*\n[ \t]*/g,' ')
+    .replace(/\s+/g,' ')
+    .trim();
+}
+
 function applySnapshot(s){
   if(!topView||!s)return;
   const cover=topView.querySelector('.cartridge-top-cover');
@@ -2047,13 +2138,14 @@ function applySnapshot(s){
   topView.querySelector('.status').textContent=s.statusChip||'';
   dialogue.classList.toggle('hidden',!s.dialogue?.show);
   dialogue.querySelector('b').textContent=s.dialogue?.name||'';
-  dialogue.querySelector('.text').textContent=s.dialogue?.text||'';
+  dialogue.querySelector('.text').textContent=compactCartridgeDialogueText(s.dialogue?.text||'');
   dialogue.querySelector('.cartridge-top-arrow')
     .classList.toggle('end',!s.dialogue?.hasMore);
 
   const audioKey=String(s.dialogue?.audioKey||'');
   const canPlay=!!(
     s.dialogue?.show&&
+    s.dialogue?.ttsEnabled!==false&&
     audioKey
   );
 
@@ -2069,11 +2161,16 @@ function applyCartridgeVoiceReady(voice){
   const dialogue=topView.querySelector('.cartridge-top-dialogue');
   const button=dialogue?.querySelector('.cartridge-top-voice');
   if(!dialogue||!button)return;
+  if(voice.ttsEnabled===false){
+    button.hidden=true;
+    button.dataset.voiceKey='';
+    return;
+  }
 
   const currentName=dialogue.querySelector('b')?.textContent||'';
-  const currentText=dialogue.querySelector('.text')?.textContent||'';
+  const currentText=compactCartridgeDialogueText(dialogue.querySelector('.text')?.textContent||'');
   if(voice.name&&currentName&&voice.name!==currentName)return;
-  if(voice.text&&currentText&&voice.text!==currentText)return;
+  if(voice.text&&currentText&&compactCartridgeDialogueText(voice.text)!==currentText)return;
 
   button.hidden=false;
   button.dataset.voiceKey=String(voice.audioKey);
@@ -2105,29 +2202,40 @@ async function openCard(html){
   btn.classList.add('running');
 
   const mirroredDialogue=topView.querySelector('.cartridge-top-dialogue');
+  const mirroredVoiceButton=mirroredDialogue.querySelector('.cartridge-top-voice');
   let topDialogueTouchAt=0;
+  let topVoiceTouchAt=0;
 
-  const handleMirroredDialogue=e=>{
-    const voiceButton=e.target.closest?.('.cartridge-top-voice');
-    if(voiceButton){
+  const playMirroredVoice=e=>{
+    if(e.type==='click'&&Date.now()-topVoiceTouchAt<700)return;
+    if(e.type==='pointerup'&&e.pointerType!=='mouse'){
+      topVoiceTouchAt=Date.now();
       e.preventDefault();
-      e.stopPropagation();
-      e.stopImmediatePropagation?.();
+    }
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
 
-      const now=Date.now();
-      if(
-        voiceButton.__lastPlayAt&&
-        now-voiceButton.__lastPlayAt<650
-      )return;
-      voiceButton.__lastPlayAt=now;
-
-      const key=voiceButton.dataset.voiceKey;
-      if(!key)return;
-      dsPlayVerifiedVoice(key,voiceButton,false)
-        .catch(err=>notify('播放失败：'+friendlyError(err)));
+    const key=mirroredVoiceButton.dataset.voiceKey;
+    if(!key){
+      notify('这条角色信息暂时没有可播放语音');
       return;
     }
 
+    dsPlayVerifiedVoice(key,mirroredVoiceButton,true)
+      .catch(err=>notify('播放失败：'+friendlyError(err)));
+  };
+
+  if(window.PointerEvent){
+    mirroredVoiceButton.addEventListener(
+      'pointerup',
+      playMirroredVoice,
+      {passive:false}
+    );
+  }
+  mirroredVoiceButton.addEventListener('click',playMirroredVoice);
+
+  const handleMirroredDialogue=e=>{
+    if(e.target.closest?.('.cartridge-top-voice'))return;
     if(e.type==='click'&&Date.now()-topDialogueTouchAt<650)return;
     if(e.type==='pointerup'&&e.pointerType!=='mouse'){
       topDialogueTouchAt=Date.now();
