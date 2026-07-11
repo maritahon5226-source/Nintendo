@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · 上屏真实音频直传与iOS同步播放修复版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · 上屏音频二进制直传点击即播版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -2107,128 +2107,157 @@ const cartridgeTopVoiceState={
   key:'',
   url:'',
   audio:null,
-  ready:false,
-  loading:false,
-  promise:null,
-  error:''
+  sourceReady:false,
+  error:'',
+  requestedAt:0
 };
 
 function clearCartridgeTopVoiceAudio(){
   const state=cartridgeTopVoiceState;
+
   if(state.audio){
     try{state.audio.pause()}catch(_){}
     try{
       state.audio.removeAttribute('src');
-      state.audio.load();
       state.audio.remove();
     }catch(_){}
   }
+
   if(state.url){
     try{URL.revokeObjectURL(state.url)}catch(_){}
   }
+
   state.key='';
   state.url='';
   state.audio=null;
-  state.ready=false;
-  state.loading=false;
-  state.promise=null;
+  state.sourceReady=false;
   state.error='';
+  state.requestedAt=0;
 }
 
 function cartridgeTopVoiceButton(){
   return topView?.querySelector?.('.cartridge-top-voice')||null;
 }
 
+function requestCurrentCartridgeVoice(){
+  const now=Date.now();
+  if(now-Number(cartridgeTopVoiceState.requestedAt||0)<450)return;
+  cartridgeTopVoiceState.requestedAt=now;
+
+  bottomFrame?.contentWindow?.postMessage({
+    type:'HB_CARTRIDGE_COMMAND',
+    command:'requestCurrentVoice'
+  },'*');
+}
+
 function updateCartridgeTopVoiceButton(button,key,status,error=''){
   if(!button)return;
+
   button.dataset.voiceKey=key||'';
   button.dataset.audioReady=status==='ready'?'1':'0';
-  button.disabled=status!=='ready';
 
   if(status==='ready'){
     button.hidden=false;
+    button.disabled=false;
     button.textContent='▶ 播放';
     button.classList.remove('loading','playing');
     button.title='点击播放角色语音';
-  }else if(status==='loading'){
+  }else if(status==='waiting'){
     button.hidden=false;
-    button.textContent='语音准备中…';
+    button.disabled=true;
+    button.textContent='语音同步中…';
     button.classList.add('loading');
     button.classList.remove('playing');
-    button.title='正在预加载角色语音';
+    button.title='正在从卡带接收当前角色语音';
   }else if(status==='error'){
     button.hidden=false;
-    button.textContent='语音载入失败';
+    button.disabled=true;
+    button.textContent='语音同步失败';
     button.classList.remove('loading','playing');
-    button.title=error||'语音载入失败';
+    button.title=error||'没有收到可播放音频';
   }else{
     button.hidden=true;
+    button.disabled=true;
     button.textContent='▶ 播放';
     button.classList.remove('loading','playing');
     button.title='';
   }
 }
 
-async function prepareCartridgeTopVoice(button,key,providedBlob=null){
+function installCartridgeTopVoiceSource(button,key,voice={}){
   key=String(key||'');
   if(!button||!key)return false;
 
-  const state=cartridgeTopVoiceState;
-  if(state.key===key&&state.ready&&state.audio){
-    updateCartridgeTopVoiceButton(button,key,'ready');
-    return true;
+  let blob=null;
+  const buffer=voice.audioBuffer;
+  const transferredBlob=voice.audioBlob;
+  const mime=String(
+    voice.ttsMime||
+    transferredBlob?.type||
+    'audio/mpeg'
+  );
+
+  if(buffer instanceof ArrayBuffer){
+    blob=new Blob([buffer],{type:mime});
+  }else if(ArrayBuffer.isView(buffer)){
+    blob=new Blob(
+      [buffer.buffer.slice(
+        buffer.byteOffset,
+        buffer.byteOffset+buffer.byteLength
+      )],
+      {type:mime}
+    );
+  }else if(
+    transferredBlob&&
+    typeof transferredBlob.size==='number'&&
+    transferredBlob.size>0
+  ){
+    blob=transferredBlob;
   }
-  if(state.key===key&&state.loading&&state.promise){
-    return state.promise;
+
+  if(!blob||blob.size<16){
+    updateCartridgeTopVoiceButton(
+      button,
+      key,
+      'waiting'
+    );
+    requestCurrentCartridgeVoice();
+    return false;
   }
 
   clearCartridgeTopVoiceAudio();
-  state.key=key;
-  state.loading=true;
-  updateCartridgeTopVoiceButton(button,key,'loading');
 
-  state.promise=(async()=>{
-    try{
-      let blob=providedBlob;
-      if(!(blob&&typeof blob.arrayBuffer==='function')){
-        blob=await dsGetAudioBlob(key);
-      }
-      if(!blob)throw new Error('游戏机没有收到这条角色语音的真实音频文件');
+  const url=URL.createObjectURL(blob);
+  const audio=document.createElement('audio');
+  audio.preload='none';
+  audio.playsInline=true;
+  audio.setAttribute('playsinline','');
+  audio.setAttribute('webkit-playsinline','');
+  audio.style.position='fixed';
+  audio.style.width='1px';
+  audio.style.height='1px';
+  audio.style.opacity='0';
+  audio.style.pointerEvents='none';
+  audio.src=url;
+  document.body.appendChild(audio);
 
-      blob=await dsNormalizeAudioBlob(blob,'角色剧情语音');
+  cartridgeTopVoiceState.key=key;
+  cartridgeTopVoiceState.url=url;
+  cartridgeTopVoiceState.audio=audio;
+  cartridgeTopVoiceState.sourceReady=true;
+  cartridgeTopVoiceState.error='';
+  cartridgeTopVoiceState.requestedAt=0;
 
-      const url=URL.createObjectURL(blob);
-      const audio=document.createElement('audio');
-      audio.preload='auto';
-      audio.playsInline=true;
-      audio.setAttribute('playsinline','');
-      audio.setAttribute('webkit-playsinline','');
-      audio.style.display='none';
-      audio.src=url;
-      document.body.appendChild(audio);
+  audio.addEventListener('error',()=>{
+    cartridgeTopVoiceState.error='浏览器无法读取这段角色语音';
+  });
 
-      await dsWaitAudioReady(audio,12000);
-
-      state.url=url;
-      state.audio=audio;
-      state.ready=true;
-      state.loading=false;
-      state.error='';
-      state.promise=null;
-
-      updateCartridgeTopVoiceButton(button,key,'ready');
-      return true;
-    }catch(error){
-      state.ready=false;
-      state.loading=false;
-      state.error=String(error?.message||error);
-      state.promise=null;
-      updateCartridgeTopVoiceButton(button,key,'error',state.error);
-      throw error;
-    }
-  })();
-
-  return state.promise;
+  updateCartridgeTopVoiceButton(
+    button,
+    key,
+    'ready'
+  );
+  return true;
 }
 
 function playPreparedCartridgeTopVoice(button){
@@ -2239,10 +2268,11 @@ function playPreparedCartridgeTopVoice(button){
     !button||
     !key||
     state.key!==key||
-    !state.ready||
+    !state.sourceReady||
     !state.audio
   ){
-    notify(state.loading?'语音仍在准备中，请稍等一下':'这条角色语音还没有准备完成');
+    notify('这条语音仍在同步，请稍等一下');
+    requestCurrentCartridgeVoice();
     return;
   }
 
@@ -2256,9 +2286,10 @@ function playPreparedCartridgeTopVoice(button){
   try{
     audio.muted=false;
     audio.volume=1;
+
     if(!audio.paused||audio.currentTime>0){
       audio.pause();
-      audio.currentTime=0;
+      try{audio.currentTime=0}catch(_){}
     }
 
     button.classList.remove('loading');
@@ -2269,19 +2300,40 @@ function playPreparedCartridgeTopVoice(button){
       button.classList.remove('playing');
       button.textContent='▶ 重播';
     };
+
     audio.onerror=()=>{
       button.classList.remove('playing');
       button.textContent='▶ 重播';
-      notify('播放失败：浏览器无法播放这段角色语音');
+      notify(
+        '播放失败：'+(
+          state.error||
+          '浏览器无法播放这段角色语音'
+        )
+      );
     };
 
-    // Important for iOS: call play() synchronously inside the tap event.
+    // No await, no IndexedDB and no pre-decode step.
+    // audio.play() runs synchronously in the user's tap event.
     const playPromise=audio.play();
-    if(playPromise&&typeof playPromise.catch==='function'){
-      playPromise.catch(error=>{
+
+    if(
+      playPromise&&
+      typeof playPromise.then==='function'
+    ){
+      playPromise.then(()=>{
+        button.classList.add('playing');
+      }).catch(error=>{
         button.classList.remove('playing');
         button.textContent='▶ 重播';
-        notify('播放失败：'+friendlyError(error));
+
+        const name=String(error?.name||'');
+        if(name==='NotAllowedError'){
+          notify('播放被 iPhone 拦截，请再点击一次播放按钮');
+        }else if(name==='NotSupportedError'){
+          notify('播放失败：当前浏览器不支持这段音频格式');
+        }else{
+          notify('播放失败：'+friendlyError(error));
+        }
       });
     }
   }catch(error){
@@ -2290,7 +2342,6 @@ function playPreparedCartridgeTopVoice(button){
     notify('播放失败：'+friendlyError(error));
   }
 }
-
 function applySnapshot(s){
   if(!topView||!s)return;
   const cover=topView.querySelector('.cartridge-top-cover');
@@ -2349,16 +2400,33 @@ function applySnapshot(s){
   voiceButton.dataset.ttsDuration=String(Number(s.dialogue?.ttsDuration||0));
 
   if(canPlay){
-    void prepareCartridgeTopVoice(voiceButton,audioKey,null)
-      .catch(error=>{
-        console.warn('上屏语音预载失败',error);
-      });
-  }else{
     if(
-      cartridgeTopVoiceState.key&&
-      cartridgeTopVoiceState.key!==audioKey
-    )clearCartridgeTopVoiceAudio();
-    updateCartridgeTopVoiceButton(voiceButton,'','hidden');
+      cartridgeTopVoiceState.key===audioKey&&
+      cartridgeTopVoiceState.sourceReady&&
+      cartridgeTopVoiceState.audio
+    ){
+      updateCartridgeTopVoiceButton(
+        voiceButton,
+        audioKey,
+        'ready'
+      );
+    }else{
+      updateCartridgeTopVoiceButton(
+        voiceButton,
+        audioKey,
+        'waiting'
+      );
+      requestCurrentCartridgeVoice();
+    }
+  }else{
+    if(cartridgeTopVoiceState.key){
+      clearCartridgeTopVoiceAudio();
+    }
+    updateCartridgeTopVoiceButton(
+      voiceButton,
+      '',
+      'hidden'
+    );
   }
 }
 function applyCartridgeVoiceReady(voice){
@@ -2381,13 +2449,17 @@ function applyCartridgeVoiceReady(voice){
   button.dataset.ttsDuration=String(Number(voice.ttsDuration||0));
   button.dataset.voiceSyncVersion=String(voice.voiceSyncVersion||3);
 
-  void prepareCartridgeTopVoice(
+  const installed=installCartridgeTopVoiceSource(
     button,
     String(voice.audioKey),
-    voice.audioBlob||null
-  ).catch(error=>{
-    console.warn('卡带真实音频预载失败',error);
-  });
+    voice
+  );
+
+  if(!installed){
+    console.warn(
+      '卡带语音事件没有包含可用二进制，将请求重新发送'
+    );
+  }
 }
 
 async function openCard(html){
