@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · API 双参数兼容版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -513,7 +513,124 @@ function studioStatus(text){const el=$('#studioStatus');if(el)el.textContent=Str
 function saveVisualMeta(){ensureVisualState();for(const kind of ['portrait','background']){const list=kind==='portrait'?state.visuals.portraits:state.visuals.backgrounds;for(const slot of list){const n=$(`#visual-name-${kind}-${slot.id}`),d=$(`#visual-desc-${kind}-${slot.id}`);if(n)slot.name=n.value.trim()||slot.name;if(d)slot.description=d.value.trim()}}save(true);renderStudio()}
 function saveVisualProfile(){state.character.appearance=$('#visualAppearance')?.value.trim()||'';save(true);renderStudio()}
 function saveVisualApiSettings(){const t=state.settings.textApi,i=state.settings.imageApi;t.baseUrl=$('#textApiBase').value.trim();t.model=$('#textApiModel').value.trim();t.maxTokens=clamp(Number($('#textApiMax').value)||1000,200,4000);t.rememberKey=$('#textApiRemember').checked;i.baseUrl=$('#imageApiBase').value.trim();i.model=$('#imageApiModel').value.trim();i.portraitSize=$('#portraitImageSize').value;i.backgroundSize=$('#backgroundImageSize').value;i.rememberKey=$('#imageApiRemember').checked;const tk=$('#textApiKey').value.trim(),ik=$('#imageApiKey').value.trim();if(t.rememberKey){localStorage.setItem('dual_soul_text_api_key',tk);sessionStorage.removeItem(TEXT_SESSION_KEY)}else{sessionStorage.setItem(TEXT_SESSION_KEY,tk);localStorage.removeItem('dual_soul_text_api_key')}if(i.rememberKey){localStorage.setItem('dual_soul_image_api_key',ik);sessionStorage.removeItem(IMAGE_SESSION_KEY)}else{sessionStorage.setItem(IMAGE_SESSION_KEY,ik);localStorage.removeItem('dual_soul_image_api_key')}save(true);renderStudio()}
-async function callTextVisual(kind,slot){if(slot.description?.trim())return slot.description.trim();const cfg=state.settings.textApi,key=textApiKey();if(!cfg.baseUrl||!cfg.model)throw new Error('请先填写文本 API 的 Base URL 和模型');const sys='You write one concise final English image prompt for a high-end Korean webtoon romance visual style. Return only the final prompt. No reasoning, no markdown, no JSON, no explanation. Prioritize a beautiful stable face, correct anatomy, identity consistency, clean composition and subtle emotion. Never introduce action poses, dramatic perspective, visible hands, extra limbs or duplicate facial features.';const user=kind==='portrait'?`Create one precise full-color Korean manhwa-style romance webtoon bust portrait prompt. The art style should feel like a polished Korean romance webtoon / manhwa: beautiful face, slim elegant features, glossy eyes, soft skin shading, clean line art, fashionable styling, delicate lips, refined modern illustration quality. Character name: ${state.character.name}. Personality: ${state.character.personality}. Speech style: ${state.character.speech}. Life background: ${state.character.background}. Appearance: ${state.character.appearance}. Emotion label: ${slot.name}. Use a stable chest-up composition at eye level, mild three-quarter or front-facing angle, straight neck, naturally connected shoulders, balanced facial proportions, symmetrical eyes, clean nose and mouth, attractive polished face, subtle expression only through eyes, brows and lips. Keep both hands and forearms completely outside the frame. No action pose, no extreme perspective, no fisheye, no tilted body, no environment. Solid pure white background #FFFFFF.`:`Create one precise full-color Korean webtoon background prompt. World/life background: ${state.character.background}. Background label: ${slot.name}. Pure environment scene only. Describe architecture, room, weather, lighting, objects, plants, time and atmosphere. Absolutely no people, no character, no silhouette, no human reflection, no human action.`;let last=null;for(const endpoint of completionEndpoints(cfg.baseUrl)){try{const headers={'Content-Type':'application/json'};if(key)headers.Authorization='Bearer '+key;const r=await fetchWithTimeout(endpoint,{method:'POST',headers,body:JSON.stringify({model:cfg.model,messages:[{role:'system',content:sys},{role:'user',content:user}],temperature:.35,max_tokens:Number(cfg.maxTokens||1000)})},90000);const raw=await r.text();let data;try{data=JSON.parse(raw)}catch{data={raw}}if(!r.ok){last=new Error(data?.error?.message||raw.slice(0,300)||'文本 API 请求失败');continue}const content=extractApiText(data);if(content)return content;last=new Error('文本 API 没有在 message/content 返回清楚的描述词')}catch(e){last=e}}throw last||new Error('文本 API 请求失败')}
+
+const DS_TOKEN_PARAM_PREF=Object.create(null);
+function dsDefaultTokenParam(model){
+  const m=String(model||'').toLowerCase();
+  return /(^|[-_.])(gpt-5|o1|o3|o4)([-_.]|$)/.test(m)
+    ?'max_completion_tokens'
+    :'max_tokens';
+}
+function dsTokenParamUnsupported(raw,param){
+  const t=String(raw||'').toLowerCase();
+  const p=String(param||'').toLowerCase();
+  return t.includes(p)&&(
+    t.includes('unsupported parameter')||
+    t.includes('not supported')||
+    t.includes('unknown parameter')||
+    t.includes('unrecognized parameter')||
+    t.includes('unrecognised parameter')||
+    t.includes('invalid parameter')||
+    t.includes('extra inputs are not permitted')
+  );
+}
+async function dsChatCompletionCompat(endpoint,{
+  headers={},
+  baseBody={},
+  maxTokens=1000,
+  timeoutMs=0,
+  signal=null,
+  scope='chat'
+}={}){
+  const model=String(baseBody?.model||'');
+  const cacheKey=scope+'|'+endpoint+'|'+model;
+  const preferred=DS_TOKEN_PARAM_PREF[cacheKey]||dsDefaultTokenParam(model);
+  const order=[
+    preferred,
+    preferred==='max_tokens'?'max_completion_tokens':'max_tokens'
+  ];
+  let last=null;
+  for(let i=0;i<order.length;i++){
+    const tokenParam=order[i];
+    const options={
+      method:'POST',
+      headers,
+      body:JSON.stringify({
+        ...baseBody,
+        [tokenParam]:Number(maxTokens)
+      }),
+      ...(signal?{signal}:{})
+    };
+    const response=timeoutMs>0
+      ?await fetchWithTimeout(endpoint,options,timeoutMs)
+      :await fetch(endpoint,options);
+    const raw=await response.text();
+    let data;
+    try{data=JSON.parse(raw)}catch(_){data={raw}}
+    last={response,raw,data,tokenParam};
+    if(response.ok){
+      DS_TOKEN_PARAM_PREF[cacheKey]=tokenParam;
+      window.__DS_LAST_TOKEN_PARAM__=tokenParam;
+      return last;
+    }
+    if(i===0&&dsTokenParamUnsupported(raw,tokenParam))continue;
+    return last;
+  }
+  return last;
+}
+
+async function callTextVisual(kind,slot){
+  if(slot.description?.trim())return slot.description.trim();
+  const cfg=state.settings.textApi,key=textApiKey();
+  if(!cfg.baseUrl||!cfg.model){
+    throw new Error('请先填写文本 API 的 Base URL 和模型');
+  }
+
+  const sys='You write one concise final English image prompt for a high-end Korean webtoon romance visual style. Return only the final prompt. No reasoning, no markdown, no JSON, no explanation. Prioritize a beautiful stable face, correct anatomy, identity consistency, clean composition and subtle emotion. Never introduce action poses, dramatic perspective, visible hands, extra limbs or duplicate facial features.';
+  const user=kind==='portrait'
+    ?`Create one precise full-color Korean manhwa-style romance webtoon bust portrait prompt. The art style should feel like a polished Korean romance webtoon / manhwa: beautiful face, slim elegant features, glossy eyes, soft skin shading, clean line art, fashionable styling, delicate lips, refined modern illustration quality. Character name: ${state.character.name}. Personality: ${state.character.personality}. Speech style: ${state.character.speech}. Life background: ${state.character.background}. Appearance: ${state.character.appearance}. Emotion label: ${slot.name}. Use a stable chest-up composition at eye level, mild three-quarter or front-facing angle, straight neck, naturally connected shoulders, balanced facial proportions, symmetrical eyes, clean nose and mouth, attractive polished face, subtle expression only through eyes, brows and lips. Keep both hands and forearms completely outside the frame. No action pose, no extreme perspective, no fisheye, no tilted body, no environment. Solid pure white background #FFFFFF.`
+    :`Create one precise full-color Korean webtoon background prompt. World/life background: ${state.character.background}. Background label: ${slot.name}. Pure environment scene only. Describe architecture, room, weather, lighting, objects, plants, time and atmosphere. Absolutely no people, no character, no silhouette, no human reflection, no human action.`;
+
+  let last=null;
+  for(const endpoint of completionEndpoints(cfg.baseUrl)){
+    try{
+      const headers={'Content-Type':'application/json'};
+      if(key)headers.Authorization='Bearer '+key;
+      const result=await dsChatCompletionCompat(endpoint,{
+        headers,
+        baseBody:{
+          model:cfg.model,
+          messages:[
+            {role:'system',content:sys},
+            {role:'user',content:user}
+          ],
+          temperature:.35
+        },
+        maxTokens:Number(cfg.maxTokens||1000),
+        timeoutMs:90000,
+        scope:'text-visual'
+      });
+
+      const r=result.response,raw=result.raw,data=result.data;
+      if(!r.ok){
+        last=new Error(
+          data?.error?.message||
+          data?.message||
+          raw.slice(0,320)||
+          '文本 API 请求失败'
+        );
+        continue;
+      }
+
+      const content=extractApiText(data);
+      if(content)return content;
+      last=new Error('文本 API 没有在 message/content 返回清楚的描述词');
+    }catch(e){
+      last=e;
+    }
+  }
+  throw last||new Error('文本 API 请求失败');
+}
 async function callImageVisual(prompt,kind){const cfg=state.settings.imageApi,key=imageApiKey(),size=kind==='portrait'?cfg.portraitSize:cfg.backgroundSize;if(!cfg.baseUrl||!cfg.model)throw new Error('请先填写生图 API 的 Base URL 和模型');const endpoints=imageEndpoints(cfg.baseUrl);if(!endpoints.length)throw new Error('生图 API 地址为空');let last=null;const headers={'Content-Type':'application/json','Accept':'application/json'};if(key)headers.Authorization='Bearer '+key;
 if(kind==='portrait'&&state.visuals.referenceKeys.length){const refs=[];for(const k of state.visuals.referenceKeys.slice(0,6)){const d=await assetGet(k).catch(()=>null);if(d)refs.push(d)}if(refs.length){const endpoint=endpoints[0];try{const payload={model:cfg.model,prompt,n:1,size,images:refs};const r=await fetchWithTimeout(endpoint,{method:'POST',headers,body:JSON.stringify(payload)},180000);const raw=await r.text();let data;try{data=raw?JSON.parse(raw):{}}catch{data={raw}}if(r.ok){const src=extractImageSource(data);if(src)return src;last=new Error(`参考图请求成功但没有图片字段。地址：${endpoint}；返回：${raw.slice(0,350)}`)}else last=new Error(`参考图模式失败（HTTP ${r.status}）\n地址：${endpoint}\n返回：${data?.error?.message||raw.slice(0,500)}`)}catch(e){last=e}notify('参考图模式首次失败，已改按外貌和描述词生成')}}
 for(const endpoint of endpoints){const payloads=[{model:cfg.model,prompt,n:1,size},{model:cfg.model,prompt,n:1}];for(let pi=0;pi<payloads.length;pi++){try{const payload=payloads[pi],r=await fetchWithTimeout(endpoint,{method:'POST',headers,body:JSON.stringify(payload)},180000),raw=await r.text();let data;try{data=raw?JSON.parse(raw):{}}catch{data={raw}}if(!r.ok){const msg=data?.error?.message||data?.message||raw.slice(0,500)||`HTTP ${r.status}`;last=new Error(`生图接口失败（HTTP ${r.status}）\n实际请求：${endpoint}\n请求字段：${Object.keys(payload).join('、')}\n接口返回：${msg}`);if(pi===0&&/size|尺寸|resolution|unsupported/i.test(msg))continue;break}const src=extractImageSource(data);if(src)return src;last=new Error(`生图 API 已返回成功状态，但没有找到图片字段。\n实际请求：${endpoint}\n返回前500字：${raw.slice(0,500)}`);break}catch(e){last=e?.name==='AbortError'?new Error(`生图请求超时或被取消。实际请求：${endpoint}`):e;break}}}
@@ -522,11 +639,11 @@ async function generateVisual(kind,id){if(runtime.generating)return;saveVisualMe
 async function clearVisual(kind,id){const slot=visualSlot(kind,id);if(!slot)return;await assetDelete(slot.assetKey).catch(()=>{});slot.assetKey='';slot.hasImage=false;save(false);renderVisualLayers();renderStudio();notify('已清空')}
 async function importVisualAsset(file){const target=runtime.assetTarget;if(!target)return;const slot=visualSlot(target.kind,target.id);if(!slot)return;try{studioStatus('正在处理上传图片…');let data=await imageFileToDataURL(file,target.kind==='portrait'?1000:1400,target.kind==='portrait'?1200:1000,target.kind==='portrait'?'image/png':'image/jpeg',target.kind==='portrait'?1:.9);if(target.kind==='portrait')data=await processPortraitDataURL(data,'whiteOnly');const key=slot.assetKey||`visual:${target.kind}:${target.id}`;await assetSet(key,data);slot.assetKey=key;slot.hasImage=true;if(target.kind==='portrait')state.visuals.currentPortrait=target.id;else state.visuals.currentBackground=target.id;save(false);await renderVisualLayers();renderStudio();studioStatus(target.kind==='portrait'?'半身图已去除与画面边缘连通的白色背景，完整保留原图左右范围，并在上屏内等比例显示。':'背景图已直接写入当前槽位。');notify('图片已保存')}catch(e){notify('图片处理失败')}finally{runtime.assetTarget=null;els.visualAssetFile.value=''}}
 async function importVisualReferences(files){ensureVisualState();try{for(const file of [...files].slice(0,Math.max(0,6-state.visuals.referenceKeys.length))){const data=await imageFileToDataURL(file,900,900,'image/jpeg',.88),key='visual:ref:'+uid();await assetSet(key,data);state.visuals.referenceKeys.push(key)}save(false);renderStudio();notify('参考图已保存')}catch(e){notify('参考图读取失败')}finally{els.visualReferenceFile.value=''}}
-async function testVisualTextApi(){saveVisualApiSettings();studioStatus('正在测试文本 API…');try{const slot={name:'平静',description:''};const t=await callTextVisual('portrait',slot);studioStatus('文本 API 测试成功：\n'+t.slice(0,320))}catch(e){studioStatus('文本 API 测试失败：'+friendlyError(e))}}
+async function testVisualTextApi(){saveVisualApiSettings();studioStatus('正在测试文本 API…');try{const slot={name:'平静',description:''};const t=await callTextVisual('portrait',slot);studioStatus('文本 API 测试成功（'+(window.__DS_LAST_TOKEN_PARAM__||'自动兼容')+'）：\n'+t.slice(0,320))}catch(e){studioStatus('文本 API 测试失败：'+friendlyError(e))}}
 async function testVisualImageApi(){saveVisualApiSettings();studioStatus('正在测试生图 API…');try{const src=await callImageVisual('A small elegant small elegant full-color Korean webtoon style decorative star icon on a plain background, no text.','background');if(!src)throw new Error('接口没有返回图片');studioStatus('生图 API 测试成功。')}catch(e){studioStatus('生图 API 测试失败：'+friendlyError(e))}}
 
 function renderSettings(){header('系统设置',true);const tab=runtime.settingsTab||'general',s=state.settings;els.content.innerHTML=`<div class="tabs"><button class="tab nav-item ${tab==='general'?'active':''}" data-settings-tab="general">一般</button><button class="tab nav-item ${tab==='appearance'?'active':''}" data-settings-tab="appearance">外观</button><button class="tab nav-item ${tab==='api'?'active':''}" data-settings-tab="api">AI 接口</button><button class="tab nav-item ${tab==='data'?'active':''}" data-settings-tab="data">存档</button></div>${tab==='general'?`<div class="panel form"><label class="check"><input id="setSound" type="checkbox" ${s.sound?'checked':''}>开启按键音</label><label class="check"><input id="setScan" type="checkbox" ${s.showScanlines?'checked':''}>显示复古扫描线</label><label class="check"><input id="setAutoSave" type="checkbox" ${s.autoSave?'checked':''}>自动保存</label><label>文字出现速度<select id="setTypeSpeed"><option value="0" ${s.typeSpeed===0?'selected':''}>立即显示</option><option value="18" ${s.typeSpeed===18?'selected':''}>快速</option><option value="32" ${s.typeSpeed===32?'selected':''}>复古</option></select></label><button class="pixel-btn primary nav-item" data-act="save-general">保存设置</button></div>`:tab==='appearance'?`<div class="panel"><div class="panel-title">机身颜色</div><div class="swatches">${Object.entries(palettes).map(([k,v])=>`<button class="swatch nav-item ${s.shell===k?'active':''}" data-shell="${k}" style="background:linear-gradient(135deg,${v.shell},${v.shell2})"></button>`).join('')}</div></div><div class="panel"><div class="panel-title">人物与背景素材</div><p class="muted">旧的像素角色和代码模拟房间已停用。请在主页进入“形象工坊”，为当前角色生成或上传表情半身图和背景图。</p><button class="pixel-btn primary nav-item" data-go="studio">打开形象工坊</button></div>`:tab==='api'?apiSettingsHtml():dataSettingsHtml()}`}
-function apiSettingsHtml(){const a=state.settings.api,key=a.rememberKey?(localStorage.getItem('dual_soul_saved_api_key')||''):(sessionStorage.getItem(SESSION_KEY)||'');return `<div class="panel form"><label class="check"><input id="apiEnabled" type="checkbox" ${a.enabled?'checked':''}>启用在线 AI 回复</label><label class="check"><input id="apiAutoVisual" type="checkbox" ${a.autoVisualSwitch!==false?'checked':''}>由聊天 API 判断并偶尔切换表情半身图 / 背景图</label><div class="api-result"><b>单句回复＋简短括号描写已启用</b><br>每次仍只输出一句完整、自然的角色回复，不分段、不换行；允许加入一段简短的角色动作或心理括号描写。内置世界书位于其下方，只补充活人感；冲突规则已移除。</div><label>Base URL<input id="apiBase" value="${esc(a.baseUrl)}" placeholder="https://api.example.com/v1"></label><label>API Key<input id="apiKey" type="password" value="${esc(key)}" autocomplete="off" placeholder="仅保存在当前设备"></label><label class="check"><input id="apiRemember" type="checkbox" ${a.rememberKey?'checked':''}>记住 API Key（仅本机）</label><label>模型<input id="apiModel" value="${esc(a.model)}" placeholder="模型名称"></label><div class="row"><label class="grow">温度<input id="apiTemp" type="number" min="0" max="2" step="0.05" value="${a.temperature}"></label><label class="grow">Max tokens<input id="apiMax" type="number" min="60" max="2000" step="20" value="${a.maxTokens}"></label></div><label>附加角色指令<textarea id="apiPrompt" maxlength="2000" placeholder="可留空">${esc(a.customPrompt||'')}</textarea></label><label class="check"><input id="apiFallback" type="checkbox" ${a.fallback?'checked':''}>接口失败时使用本地回复</label><div class="row"><button class="pixel-btn primary nav-item" data-act="save-api">保存</button><button class="pixel-btn nav-item" data-act="test-api">测试连接</button><button class="pixel-btn nav-item" data-act="fetch-models">读取模型</button></div><div id="apiResult" class="api-result">兼容 OpenAI 风格的 /chat/completions 接口。部分服务不允许从本地 HTML 跨域访问。</div></div>`}
+function apiSettingsHtml(){const a=state.settings.api,key=a.rememberKey?(localStorage.getItem('dual_soul_saved_api_key')||''):(sessionStorage.getItem(SESSION_KEY)||'');return `<div class="panel form"><label class="check"><input id="apiEnabled" type="checkbox" ${a.enabled?'checked':''}>启用在线 AI 回复</label><label class="check"><input id="apiAutoVisual" type="checkbox" ${a.autoVisualSwitch!==false?'checked':''}>由聊天 API 判断并偶尔切换表情半身图 / 背景图</label><div class="api-result"><b>单句回复＋简短括号描写已启用</b><br>每次仍只输出一句完整、自然的角色回复，不分段、不换行；允许加入一段简短的角色动作或心理括号描写。内置世界书位于其下方，只补充活人感；冲突规则已移除。</div><label>Base URL<input id="apiBase" value="${esc(a.baseUrl)}" placeholder="https://api.example.com/v1"></label><label>API Key<input id="apiKey" type="password" value="${esc(key)}" autocomplete="off" placeholder="仅保存在当前设备"></label><label class="check"><input id="apiRemember" type="checkbox" ${a.rememberKey?'checked':''}>记住 API Key（仅本机）</label><label>模型<input id="apiModel" value="${esc(a.model)}" placeholder="模型名称"></label><div class="row"><label class="grow">温度<input id="apiTemp" type="number" min="0" max="2" step="0.05" value="${a.temperature}"></label><label class="grow">Max tokens<input id="apiMax" type="number" min="60" max="2000" step="20" value="${a.maxTokens}"></label></div><label>附加角色指令<textarea id="apiPrompt" maxlength="2000" placeholder="可留空">${esc(a.customPrompt||'')}</textarea></label><label class="check"><input id="apiFallback" type="checkbox" ${a.fallback?'checked':''}>接口失败时使用本地回复</label><div class="row"><button class="pixel-btn primary nav-item" data-act="save-api">保存</button><button class="pixel-btn nav-item" data-act="test-api">测试连接</button><button class="pixel-btn nav-item" data-act="fetch-models">读取模型</button></div><div id="apiResult" class="api-result">兼容 OpenAI 风格的 /chat/completions 接口；自动适配 max_tokens 与 max_completion_tokens。部分服务不允许从本地 HTML 跨域访问。</div></div>`}
 function dataSettingsHtml(){return `<div class="panel"><div class="panel-title">当前存档</div><p class="muted">创建于 ${fmtDate(state.createdAt)} · 对话 ${state.stats.talks} 次</p><div class="row"><button class="pixel-btn primary nav-item" data-act="manual-save">立即保存</button><button class="pixel-btn nav-item" data-act="export-save">导出 JSON</button><button class="pixel-btn nav-item" data-act="import">导入 JSON</button></div></div><div class="panel"><div class="panel-title">危险操作</div><p class="muted">重置后本机存档会被删除。请先导出备份。</p><button class="pixel-btn danger nav-item" data-act="reset-save">删除整个存档</button></div>`}
 function renderHelp(){header('操作说明',runtime.page!=='title');els.content.innerHTML=`<div class="panel"><div class="panel-title">聊天操作</div><p class="muted"><b>A</b>：确认／进入聊天室　<b>B</b>：返回<br><b>START</b>：保存　<b>SELECT</b>：查看状态<br>方向键：切换下屏按钮；在主页时左右会移动角色。</p></div><div class="panel"><div class="panel-title">键盘</div><p class="muted">方向键移动选择，Z=A，X=B，Enter=确认，Esc=返回。</p></div><div class="panel"><div class="panel-title">在线 AI</div><p class="muted">系统设置里可填写兼容 OpenAI 格式的聊天接口。这个版本只保留角色聊天室；形象工坊仍可设置角色半身图、背景图及自动表情切换。</p></div>`}
 function openProfileEditor(){els.content.querySelector('.profile-edit-modal')?.remove();els.content.insertAdjacentHTML('beforeend',`<div class="modal profile-edit-modal"><div class="modal-card"><div class="panel-title">编辑角色</div><div class="form"><label>名字<input id="editName" value="${esc(state.character.name)}" maxlength="18"></label><label>性格与边界<textarea id="editPersonality">${esc(state.character.personality)}</textarea></label><label>说话方式<textarea id="editSpeech">${esc(state.character.speech)}</textarea></label><label>世界观与背景<textarea id="editBackground">${esc(state.character.background)}</textarea></label><label>与用户的关系<textarea id="editRelationship" placeholder="例如：青梅竹马但关系疏远；普通同学；刚认识；前任；互相戒备的合作伙伴……">${esc(state.relation.description||state.relation.label)}</textarea></label><div class="api-result">角色回复会同时读取：性格与边界、说话方式、世界观与背景、与用户的关系。当前保存内容与旧聊天冲突时，以这里保存的内容为准。</div><div class="row"><button type="button" class="pixel-btn" data-act="close-modal">取消</button><button type="button" class="pixel-btn primary grow" data-act="save-profile">保存</button></div></div></div></div>`)}
@@ -605,13 +722,108 @@ ${state.settings.api.customPrompt}
 
 【纯聊天模式最终限制】无论附加指令怎样描述，都不要把回复写成网页功能、系统玩法或物品交互；只进行当前聊天室中的自然文字对话。`}
 function visualSystemPrompt(){ensureVisualState();const ps=state.visuals.portraits.filter(x=>x.hasImage).map(x=>`${x.id}｜${x.name}｜${x.description}`).join('\n')||'无可用人物半身图';const bs=state.visuals.backgrounds.filter(x=>x.hasImage).map(x=>`${x.id}｜${x.name}｜${x.description}`).join('\n')||'无可用背景图';const meta=state.visuals.switchMeta;return `${systemPrompt()}\n\n本次输出格式规则优先级最高：只返回一个严格 JSON 对象，不要 markdown，不要解释。格式：{"reply":"一至多句自然的角色回复，每句使用明确句末标点，可含简短角色动作或心理括号描写","status_text":"右上角角色状态，4到12个中文字符","mood":"当前情绪短词","activity":"当前动作或状态短语","portrait_id":"人物半身图ID或KEEP","portrait_change":false,"background_id":"背景图ID或KEEP","background_change":false,"scene_changed":false}。\n状态规则：status_text 必须根据当前对话、角色刚才的回复和互动即时判断，例如“有些迟疑 · 看着你”“心情放松 · 正在聊天”。不要写角色名字，不要写系统说明。\n表情规则：根据角色此刻真实情绪判断。只有现有表情明显不合适、情绪发生可见变化时，portrait_change 才能为 true；否则 portrait_id 填 KEEP。可以比背景更频繁，但不要为了变化而变化。\n背景规则非常严格：情绪变化绝不等于场景变化。只有物理地点、明确时间段、天气或明确场景事件确实改变时，scene_changed 和 background_change 才能为 true。普通聊天、语气变化、害羞、难过、开心都必须保持当前背景。背景不得连续切换；不确定时一律 KEEP。\n可用人物半身图：\n${ps}\n可用背景图：\n${bs}\n当前人物半身图：${state.visuals.currentPortrait}\n当前背景图：${state.visuals.currentBackground}\n当前右上角状态：${state.status.display||state.status.mood+' · '+state.status.activity}\n视觉判断轮次：${meta.turn}；上次背景切换轮次：${meta.lastBackgroundTurn}`}
-async function onlineReplyBundle(text){const a=state.settings.api,key=apiKey();if(!a.baseUrl||!a.model)throw new Error('请填写 Base URL 和模型');runtime.apiController=new AbortController();const headers={'Content-Type':'application/json'};if(key)headers.Authorization=`Bearer ${key}`;const useVisual=a.autoVisualSwitch!==false;const res=await fetch(chatEndpoint(a.baseUrl),{method:'POST',headers,body:JSON.stringify({model:a.model,messages:[{role:'system',content:useVisual?visualSystemPrompt():systemPrompt()},{role:'user',content:text}],temperature:Number(a.temperature),max_tokens:Number(a.maxTokens)}),signal:runtime.apiController.signal});const raw=await res.text();let data;try{data=JSON.parse(raw)}catch{data={raw}}if(!res.ok)throw new Error(data?.error?.message||data?.message||raw.slice(0,260)||`HTTP ${res.status}`);const content=data?.choices?.[0]?.message?.content||data?.choices?.[0]?.text||data?.output_text||'';if(!useVisual)return{reply:String(content).trim(),status_text:'',mood:'',activity:'',portrait_id:'KEEP',portrait_change:false,background_id:'KEEP',background_change:false,scene_changed:false};const parsed=parseStrictJSON(content);if(!parsed||typeof parsed.reply!=='string')return{reply:String(content).trim(),status_text:'',mood:'',activity:'',portrait_id:'KEEP',portrait_change:false,background_id:'KEEP',background_change:false,scene_changed:false};return{reply:parsed.reply.trim(),status_text:String(parsed.status_text||'').trim(),mood:String(parsed.mood||'').trim(),activity:String(parsed.activity||'').trim(),portrait_id:String(parsed.portrait_id||'KEEP'),portrait_change:parsed.portrait_change===true||String(parsed.portrait_change).toLowerCase()==='true',background_id:String(parsed.background_id||'KEEP'),background_change:parsed.background_change===true||String(parsed.background_change).toLowerCase()==='true',scene_changed:parsed.scene_changed===true||String(parsed.scene_changed).toLowerCase()==='true'}}
+async function onlineReplyBundle(text){
+  const a=state.settings.api,key=apiKey();
+  if(!a.baseUrl||!a.model)throw new Error('请填写 Base URL 和模型');
+
+  runtime.apiController=new AbortController();
+  const headers={'Content-Type':'application/json'};
+  if(key)headers.Authorization=`Bearer ${key}`;
+  const useVisual=a.autoVisualSwitch!==false;
+
+  const result=await dsChatCompletionCompat(
+    chatEndpoint(a.baseUrl),
+    {
+      headers,
+      baseBody:{
+        model:a.model,
+        messages:[
+          {
+            role:'system',
+            content:useVisual?visualSystemPrompt():systemPrompt()
+          },
+          {
+            role:'user',
+            content:text
+          }
+        ],
+        temperature:Number(a.temperature)
+      },
+      maxTokens:Number(a.maxTokens),
+      signal:runtime.apiController.signal,
+      scope:'normal-chat'
+    }
+  );
+
+  const res=result.response,raw=result.raw,data=result.data;
+  if(!res.ok){
+    throw new Error(
+      data?.error?.message||
+      data?.message||
+      raw.slice(0,320)||
+      `HTTP ${res.status}`
+    );
+  }
+
+  const content=
+    data?.choices?.[0]?.message?.content||
+    data?.choices?.[0]?.text||
+    data?.output_text||
+    '';
+
+  if(!useVisual){
+    return{
+      reply:String(content).trim(),
+      status_text:'',
+      mood:'',
+      activity:'',
+      portrait_id:'KEEP',
+      portrait_change:false,
+      background_id:'KEEP',
+      background_change:false,
+      scene_changed:false
+    };
+  }
+
+  const parsed=parseStrictJSON(content);
+  if(!parsed||typeof parsed.reply!=='string'){
+    return{
+      reply:String(content).trim(),
+      status_text:'',
+      mood:'',
+      activity:'',
+      portrait_id:'KEEP',
+      portrait_change:false,
+      background_id:'KEEP',
+      background_change:false,
+      scene_changed:false
+    };
+  }
+
+  return{
+    reply:parsed.reply.trim(),
+    status_text:String(parsed.status_text||'').trim(),
+    mood:String(parsed.mood||'').trim(),
+    activity:String(parsed.activity||'').trim(),
+    portrait_id:String(parsed.portrait_id||'KEEP'),
+    portrait_change:
+      parsed.portrait_change===true||
+      String(parsed.portrait_change).toLowerCase()==='true',
+    background_id:String(parsed.background_id||'KEEP'),
+    background_change:
+      parsed.background_change===true||
+      String(parsed.background_change).toLowerCase()==='true',
+    scene_changed:
+      parsed.scene_changed===true||
+      String(parsed.scene_changed).toLowerCase()==='true'
+  };
+}
 async function onlineReply(text){return (await onlineReplyBundle(text)).reply}
 function applyVisualBundle(bundle,source='chat'){ensureVisualState();const meta=state.visuals.switchMeta;meta.turn=(meta.turn||0)+1;const p=String(bundle?.portrait_id||'KEEP').trim(),b=String(bundle?.background_id||'KEEP').trim();const validP=state.visuals.portraits.find(x=>x.id===p&&x.hasImage),validB=state.visuals.backgrounds.find(x=>x.id===b&&x.hasImage);if(bundle?.portrait_change===true&&p!=='KEEP'&&validP&&p!==state.visuals.currentPortrait){state.visuals.currentPortrait=p;meta.lastPortraitTurn=meta.turn}const currentBg=visualSlot('background',state.visuals.currentBackground);const minBgGap=source==='interaction'?2:4;const gap=meta.turn-(meta.lastBackgroundTurn??-99);if(bundle?.background_change===true&&bundle?.scene_changed===true&&b!=='KEEP'&&validB&&b!==state.visuals.currentBackground&&(gap>=minBgGap||!currentBg?.hasImage)){state.visuals.currentBackground=b;meta.lastBackgroundTurn=meta.turn;meta.lastBackgroundId=b}if(bundle?.mood)state.status.mood=String(bundle.mood).slice(0,20);if(bundle?.activity)state.status.activity=String(bundle.activity).slice(0,28);if(bundle?.status_text){state.status.display=String(bundle.status_text).replace(/[\r\n]/g,' ').trim().slice(0,28)}else state.status.display=`${state.status.mood} · ${state.status.activity||''}`;updateScene()}
 
 function saveGeneral(){state.settings.sound=$('#setSound').checked;state.settings.showScanlines=$('#setScan').checked;state.settings.autoSave=$('#setAutoSave').checked;state.settings.typeSpeed=Number($('#setTypeSpeed').value);if($('#setWeather'))state.room.weather=$('#setWeather').value;save(true);applyTheme();updateScene();renderSettings()}
 function saveApiSettings(){const a=state.settings.api;a.enabled=$('#apiEnabled').checked;a.autoVisualSwitch=$('#apiAutoVisual')?.checked!==false;a.baseUrl=$('#apiBase').value.trim();a.model=$('#apiModel').value.trim();a.temperature=clamp(Number($('#apiTemp').value)||.85,0,2);a.maxTokens=clamp(Number($('#apiMax').value)||420,60,2000);a.rememberKey=$('#apiRemember').checked;a.fallback=$('#apiFallback').checked;a.customPrompt=$('#apiPrompt').value.trim();const key=$('#apiKey').value.trim();if(a.rememberKey){localStorage.setItem('dual_soul_saved_api_key',key);sessionStorage.removeItem(SESSION_KEY)}else{sessionStorage.setItem(SESSION_KEY,key);localStorage.removeItem('dual_soul_saved_api_key')}save(true);renderSettings()}
-async function testApi(){saveApiSettings();const out=$('#apiResult');if(out)out.textContent='正在连接……';try{const reply=await onlineReply('只回复“连接成功”，不要添加其他内容。');const box=$('#apiResult');if(box)box.textContent=`连接成功\n模型回复：${reply}`;notify('连接成功')}catch(e){const box=$('#apiResult');if(box)box.textContent=`连接失败：${friendlyError(e)}`;notify('连接失败')}}
+async function testApi(){saveApiSettings();const out=$('#apiResult');if(out)out.textContent='正在连接……';try{const reply=await onlineReply('只回复“连接成功”，不要添加其他内容。');const box=$('#apiResult');if(box)box.textContent=`连接成功｜${window.__DS_LAST_TOKEN_PARAM__||'自动兼容'}\n模型回复：${reply}`;notify('连接成功')}catch(e){const box=$('#apiResult');if(box)box.textContent=`连接失败：${friendlyError(e)}`;notify('连接失败')}}
 async function fetchModels(){saveApiSettings();const out=$('#apiResult');if(out)out.textContent='正在读取模型……';try{const headers={};const key=apiKey();if(key)headers.Authorization=`Bearer ${key}`;const r=await fetch(modelEndpoint(state.settings.api.baseUrl),{headers});const raw=await r.text();let d;try{d=JSON.parse(raw)}catch{d={raw}}if(!r.ok)throw new Error(d?.error?.message||raw.slice(0,200));const models=(d.data||d.models||[]).map(x=>typeof x==='string'?x:x.id||x.name).filter(Boolean).slice(0,40);const box=$('#apiResult');if(box)box.textContent=models.length?`可用模型：\n${models.join('\n')}`:'接口没有返回模型列表'}catch(e){const box=$('#apiResult');if(box)box.textContent=`读取失败：${friendlyError(e)}`}}
 function exportSave(){if(!state){notify('没有可导出的存档');return}const copy=JSON.parse(JSON.stringify(state));copy.settings.api.rememberKey=false;copy.settings.textApi.rememberKey=false;copy.settings.imageApi.rememberKey=false;const blob=new Blob([JSON.stringify(copy,null,2)],{type:'application/json'}),a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=`dual-soul-${state.character.name}-${fmtDate(Date.now())}.json`;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),1000);notify('已导出存档')}
 async function importSave(file){try{const obj=JSON.parse(await file.text());if(!obj||typeof obj!=='object'||!obj.character||!obj.settings)throw new Error('不是有效的 DUAL//SOUL 存档');state=sanitizeChatOnlyState(merge(defaultState(),obj));state.version=VERSION;ensureVisualState();localStorage.setItem(STORAGE_KEY,JSON.stringify(state));runtime.stack=[];runtime.page='home';runtime.selected=0;applyTheme();updateScene();render();say('存档已经回到机器里。');notify('导入成功')}catch(e){console.error(e);notify('导入失败：'+friendlyError(e))}finally{els.importFile.value=''}}
