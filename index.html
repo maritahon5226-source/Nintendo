@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · 上屏原生音频播放器Base64直传版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · 自动播放当前信息框语音版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -675,6 +675,7 @@ function renderDialogueQueue(){
     els.dialogueVoiceBtn.hidden=false;
     els.dialogueVoiceBtn.dataset.voiceKey=message.audioKey;
     els.dialogueVoiceBtn.textContent='▶ 播放';
+    void dsMaybeAutoPlaySavedVoice(message.audioKey,els.dialogueVoiceBtn);
   }else{
     els.dialogueVoiceBtn.hidden=true;
     els.dialogueVoiceBtn.dataset.voiceKey='';
@@ -747,6 +748,7 @@ const dsttsUrlCache=new Map();
 function dsTtsDefaults(){
   return {
     enabled:false,
+    autoPlayCurrent:false,
     provider:'minimax',
     speed:1,
     language:'auto',
@@ -1229,6 +1231,40 @@ async function dsPlayVerifiedVoice(key,button,force=false){
   return dsPlayVoice(key,button,force);
 }
 
+const dsAutoPlayedVoiceKeys=new Set();
+let dsAutoPlayBlockedNoticeShown=false;
+
+async function dsMaybeAutoPlaySavedVoice(key,button){
+  const cfg=dsTtsConfig();
+  key=String(key||'');
+
+  if(
+    !cfg.enabled||
+    !cfg.autoPlayCurrent||
+    !key||
+    dsAutoPlayedVoiceKeys.has(key)
+  )return;
+
+  dsAutoPlayedVoiceKeys.add(key);
+  if(dsAutoPlayedVoiceKeys.size>160){
+    const first=dsAutoPlayedVoiceKeys.values().next().value;
+    dsAutoPlayedVoiceKeys.delete(first);
+  }
+
+  try{
+    await dsPlayVerifiedVoice(key,button,true);
+  }catch(error){
+    const name=String(error?.name||'');
+    if(
+      !dsAutoPlayBlockedNoticeShown&&
+      (name==='NotAllowedError'||/notallowed|gesture|自动播放|autoplay/i.test(String(error?.message||error)))
+    ){
+      dsAutoPlayBlockedNoticeShown=true;
+      notify('浏览器阻止了有声自动播放，请手动点一次播放按钮。');
+    }
+  }
+}
+
 function dsVoiceButtonHtml(item){
   if(!dsTtsConfig().enabled)return'';
   if(item?.audioKey){
@@ -1403,7 +1439,8 @@ function dsTtsSettingsHtml(){
   return `<div class="panel form">
     <div class="panel-title">角色语音接入 TTS</div>
     <label class="row"><input id="ttsEnabled" type="checkbox" style="width:auto" ${t.enabled?'checked':''}>开启角色回复语音</label>
-    <p class="tts-note">关闭时完全不调用语音 API。开启后会先完成每条角色语音，再显示文字消息；失败会提示并保留文字。不会自动播放。旁白、动作和括号内容会原样显示；TTS只读取中文引号“”里的角色台词。</p>
+    <label class="row"><input id="ttsAutoPlayCurrent" type="checkbox" style="width:auto" ${t.autoPlayCurrent?'checked':''}>自动播放当前信息框语音</label>
+    <p class="tts-note">关闭语音时完全不调用语音 API。开启自动播放后，每条当前角色信息框的语音准备完成时只自动播放一次；关闭时仍可手动播放。旁白、动作和括号内容会原样显示；TTS只读取中文引号“”里的角色台词。iPhone 若拦截有声自动播放，会保留手动播放器。</p>
     <label>服务商<select id="ttsProvider">
       <option value="minimax" ${t.provider==='minimax'?'selected':''}>MiniMax TTS</option>
       <option value="elevenlabs" ${t.provider==='elevenlabs'?'selected':''}>ElevenLabs TTS</option>
@@ -1498,6 +1535,7 @@ function dsReadTtsForm(){
   return {
     ...old,
     enabled:!!$('#ttsEnabled')?.checked,
+    autoPlayCurrent:!!$('#ttsAutoPlayCurrent')?.checked,
     provider:$('#ttsProvider')?.value||'minimax',
     speed:Number($('#ttsSpeed')?.value||1),
     language:$('#ttsLanguage')?.value.trim()||'auto',
@@ -1541,6 +1579,12 @@ function saveTtsSettings(){
   save(true);
   notify(cfg.enabled?'语音接入已开启':'语音接入已关闭');
   renderSettings();
+  if(running){
+    bottomFrame?.contentWindow?.postMessage({
+      type:'HB_CARTRIDGE_COMMAND',
+      command:'syncTop'
+    },'*');
+  }
 }
 async function testTts(){
   const box=$('#ttsResult');
@@ -2141,6 +2185,8 @@ const cartridgeTopVoiceState={
   error:'',
   requestedAt:0
 };
+const cartridgeTopAutoPlayedKeys=new Set();
+let cartridgeTopAutoPlayBlockedNoticeShown=false;
 
 function cartridgeTopVoiceElements(){
   const dialogue=topView?.querySelector?.('.cartridge-top-dialogue')||null;
@@ -2205,6 +2251,60 @@ function showCartridgeNativeAudio(key){
   if(audio){
     audio.hidden=false;
     audio.dataset.voiceKey=key||'';
+  }
+}
+
+function maybeAutoPlayCartridgeTopVoice(key,requestedAutoPlay=false){
+  key=String(key||'');
+  const cfg=dsTtsConfig();
+  const shouldAutoPlay=(
+    requestedAutoPlay===true||
+    cfg.autoPlayCurrent===true
+  );
+
+  if(
+    !cfg.enabled||
+    !shouldAutoPlay||
+    !key||
+    cartridgeTopAutoPlayedKeys.has(key)
+  )return;
+
+  const {audio}=cartridgeTopVoiceElements();
+  if(
+    !audio||
+    !audio.src||
+    cartridgeTopVoiceState.key!==key||
+    !cartridgeTopVoiceState.sourceReady
+  )return;
+
+  cartridgeTopAutoPlayedKeys.add(key);
+  if(cartridgeTopAutoPlayedKeys.size>160){
+    const first=cartridgeTopAutoPlayedKeys.values().next().value;
+    cartridgeTopAutoPlayedKeys.delete(first);
+  }
+
+  try{
+    audio.muted=false;
+    audio.volume=1;
+    try{audio.currentTime=0}catch(_){}
+
+    const promise=audio.play();
+    if(promise&&typeof promise.catch==='function'){
+      promise.catch(error=>{
+        const name=String(error?.name||'');
+        audio.dataset.autoPlayBlocked='1';
+
+        if(
+          !cartridgeTopAutoPlayBlockedNoticeShown&&
+          (name==='NotAllowedError'||/notallowed|gesture|自动播放|autoplay/i.test(String(error?.message||error)))
+        ){
+          cartridgeTopAutoPlayBlockedNoticeShown=true;
+          notify('iPhone 阻止了有声自动播放，请手动点一下播放器；后续语音仍会继续尝试自动播放。');
+        }
+      });
+    }
+  }catch(error){
+    console.warn('当前信息框语音自动播放失败',error);
   }
 }
 
@@ -2284,8 +2384,14 @@ function installCartridgeTopVoiceSource(key,voice={}){
     showCartridgeNativeAudio(key);
   };
 
-  // Display the native control immediately. iOS will load/decode on the user's tap.
+  // Display the native control immediately.
   showCartridgeNativeAudio(key);
+  queueMicrotask(()=>{
+    maybeAutoPlayCartridgeTopVoice(
+      key,
+      voice.autoPlayCurrent===true
+    );
+  });
   return true;
 }
 function applySnapshot(s){
@@ -2358,6 +2464,12 @@ function applySnapshot(s){
       voiceAudio?.src
     ){
       showCartridgeNativeAudio(audioKey);
+      queueMicrotask(()=>{
+        maybeAutoPlayCartridgeTopVoice(
+          audioKey,
+          s.dialogue?.autoPlayCurrent===true
+        );
+      });
     }else{
       showCartridgeVoiceWaiting(audioKey);
       requestCurrentCartridgeVoice();
