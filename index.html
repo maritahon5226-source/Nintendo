@@ -7,7 +7,7 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="manifest" href="manifest.json">
-<title>DUAL//SOUL · 单角色双屏陪伴机 · 喇叭图标按钮重新上传版</title>
+<title>DUAL//SOUL · 单角色双屏陪伴机 · 原生播放键喇叭外观稳定版</title>
 <style>
 :root{
   --shell:#d9d9d4;--shell2:#bdbdb7;--edge:#858681;--ink:#222923;--muted:#6f786f;
@@ -514,6 +514,97 @@ button{max-width:100%}
   display:none!important;
   width:0!important;
   height:0!important;
+}
+.cartridge-top-actions{
+  justify-content:flex-end!important;
+}
+.cartridge-top-voice-status{
+  margin-right:auto!important;
+}
+
+
+.cartridge-top-voice-status[data-retryable="1"]{
+  cursor:pointer;
+  text-decoration:underline;
+  text-underline-offset:2px;
+  pointer-events:auto;
+  touch-action:manipulation;
+}
+
+
+/* 上屏语音：外观是喇叭，实际点击区域是 Safari 原生 audio controls */
+.cartridge-top-speaker-btn{display:none!important}
+.cartridge-native-play-mask{
+  position:relative;
+  display:inline-block;
+  flex:0 0 30px;
+  width:30px;
+  height:30px;
+  min-width:30px;
+  min-height:30px;
+  overflow:hidden;
+  border-radius:50%;
+  isolation:isolate;
+  -webkit-tap-highlight-color:transparent;
+  touch-action:auto;
+}
+.cartridge-native-play-mask[hidden]{display:none!important}
+.cartridge-native-play-mask .cartridge-top-native-audio{
+  position:absolute!important;
+  z-index:2;
+  top:0!important;
+  left:0!important;
+  display:block!important;
+  width:180px!important;
+  min-width:180px!important;
+  max-width:none!important;
+  height:30px!important;
+  min-height:30px!important;
+  margin:0!important;
+  padding:0!important;
+  border:0!important;
+  opacity:.01!important;
+  pointer-events:auto!important;
+  touch-action:auto!important;
+  transform:none!important;
+  -webkit-appearance:auto!important;
+  appearance:auto!important;
+}
+.cartridge-speaker-skin{
+  position:absolute;
+  z-index:3;
+  inset:0;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+  border:1px solid rgba(96,88,94,.72);
+  border-radius:50%;
+  background:linear-gradient(180deg,#fff,#ece8eb);
+  color:#4c454a;
+  box-shadow:0 1px 0 #fff inset,0 1px 3px rgba(40,34,38,.18);
+  pointer-events:none!important;
+  user-select:none;
+  -webkit-user-select:none;
+}
+.cartridge-speaker-skin svg{
+  width:17px;
+  height:17px;
+  overflow:visible;
+  pointer-events:none!important;
+}
+.cartridge-speaker-skin .speaker-body{
+  fill:currentColor;
+  stroke:none;
+}
+.cartridge-speaker-skin .speaker-wave{
+  fill:none;
+  stroke:currentColor;
+  stroke-width:1.65;
+  stroke-linecap:round;
+}
+.cartridge-speaker-skin .wave-two{opacity:.42}
+.cartridge-native-play-mask:has(.cartridge-top-native-audio:not(:paused)) .cartridge-speaker-skin{
+  background:linear-gradient(180deg,#e3dde1,#cfc6cc);
 }
 .cartridge-top-actions{
   justify-content:flex-end!important;
@@ -2204,7 +2295,7 @@ function createTopMount(){
       <span class="route"></span>
       <span class="status"></span>
     </div>
-    <div class="cartridge-top-dialogue hidden"><b></b><span class="text"></span><div class="cartridge-top-actions"><span class="cartridge-top-voice-status" hidden>语音同步中…</span><button type="button" class="cartridge-top-speaker-btn" aria-label="播放语音" title="播放语音" hidden><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="speaker-body" d="M4 9.2h4l4.8-4v13.6L8 14.8H4z"/><path class="speaker-wave wave-one" d="M16 8.2c1.1 1 1.7 2.3 1.7 3.8s-.6 2.8-1.7 3.8"/><path class="speaker-wave wave-two" d="M18.4 5.8c1.8 1.7 2.8 3.8 2.8 6.2s-1 4.5-2.8 6.2"/></svg></button><audio class="cartridge-top-native-audio" preload="metadata" playsinline webkit-playsinline hidden></audio><span class="cartridge-top-arrow">▼</span></div></div>
+    <div class="cartridge-top-dialogue hidden"><b></b><span class="text"></span><div class="cartridge-top-actions"><span class="cartridge-top-voice-status" hidden>语音同步中…</span><span class="cartridge-native-play-mask" role="group" aria-label="角色语音播放器" hidden><audio class="cartridge-top-native-audio" controls controlslist="nodownload noplaybackrate" preload="metadata" playsinline webkit-playsinline aria-label="播放角色语音"></audio><span class="cartridge-speaker-skin" aria-hidden="true"><svg viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path class="speaker-body" d="M4 9.2h4l4.8-4v13.6L8 14.8H4z"/><path class="speaker-wave wave-one" d="M16 8.2c1.1 1 1.7 2.3 1.7 3.8s-.6 2.8-1.7 3.8"/><path class="speaker-wave wave-two" d="M18.4 5.8c1.8 1.7 2.8 3.8 2.8 6.2s-1 4.5-2.8 6.2"/></svg></span></span><span class="cartridge-top-arrow">▼</span></div></div>
   </div>
   <span class="cartridge-running-mark">CARTRIDGE</span>`;
   topScreen.appendChild(mount);
@@ -2277,7 +2368,10 @@ const cartridgeTopVoiceState={
   dataUrl:'',
   sourceReady:false,
   error:'',
-  requestedAt:0
+  requestedAt:0,
+  expectedKey:'',
+  syncAttempts:0,
+  syncTimer:0
 };
 const cartridgeTopAutoPlayedKeys=new Set();
 let cartridgeTopAutoPlayBlockedNoticeShown=false;
@@ -2287,7 +2381,8 @@ function cartridgeTopVoiceElements(){
   return{
     dialogue,
     audio:dialogue?.querySelector?.('.cartridge-top-native-audio')||null,
-    button:dialogue?.querySelector?.('.cartridge-top-speaker-btn')||null,
+    mask:dialogue?.querySelector?.('.cartridge-native-play-mask')||null,
+    skin:dialogue?.querySelector?.('.cartridge-speaker-skin')||null,
     status:dialogue?.querySelector?.('.cartridge-top-voice-status')||null
   };
 }
@@ -2295,12 +2390,11 @@ function cartridgeTopVoiceElements(){
 function clearCartridgeTopVoiceAudio(){
   const elements=cartridgeTopVoiceElements();
   const audio=elements.audio;
-  const button=elements.button;
+  const mask=elements.mask;
 
-  if(button){
-    button.hidden=true;
-    button.dataset.voiceKey='';
-    dsSetVoiceButtonVisual(button,'ready');
+  if(mask){
+    mask.hidden=true;
+    mask.dataset.voiceKey='';
   }
 
   if(audio){
@@ -2324,47 +2418,137 @@ function clearCartridgeTopVoiceAudio(){
   cartridgeTopVoiceState.sourceReady=false;
   cartridgeTopVoiceState.error='';
   cartridgeTopVoiceState.requestedAt=0;
+  cartridgeTopVoiceState.expectedKey='';
+  cartridgeTopVoiceState.syncAttempts=0;
+  clearTimeout(cartridgeTopVoiceState.syncTimer);
+  cartridgeTopVoiceState.syncTimer=0;
 }
 
-function requestCurrentCartridgeVoice(){
+function readCurrentVoiceFromDirectBridge(expectedKey=''){
+  try{
+    const bridge=bottomFrame?.contentWindow?.HB_TTS_BRIDGE;
+    if(!bridge||typeof bridge.getCurrentVoice!=='function')return false;
+
+    const voice=bridge.getCurrentVoice();
+    if(
+      voice?.audioKey&&
+      (!expectedKey||String(voice.audioKey)===String(expectedKey))
+    ){
+      applyCartridgeVoiceReady(voice);
+      return true;
+    }
+
+    if(typeof bridge.requestCurrentVoice==='function'){
+      bridge.requestCurrentVoice();
+    }
+  }catch(error){
+    console.warn('直接读取卡带语音桥接失败，将使用消息同步备用',error);
+  }
+  return false;
+}
+
+function stopCartridgeVoiceSyncTimer(){
+  clearTimeout(cartridgeTopVoiceState.syncTimer);
+  cartridgeTopVoiceState.syncTimer=0;
+}
+
+function markCartridgeVoiceSyncFailed(key,reason='语音同步失败，点击重试'){
+  stopCartridgeVoiceSyncTimer();
+  cartridgeTopVoiceState.error=reason;
+  const {mask,status}=cartridgeTopVoiceElements();
+  if(mask)mask.hidden=true;
+  if(status){
+    status.hidden=false;
+    status.dataset.voiceKey=key||'';
+    status.dataset.retryable='1';
+    status.textContent=reason;
+    status.title='点击重新同步当前语音';
+  }
+}
+
+function requestCurrentCartridgeVoice(expectedKey='',force=false){
+  expectedKey=String(
+    expectedKey||
+    cartridgeTopVoiceState.expectedKey||
+    cartridgeTopVoiceElements().status?.dataset?.voiceKey||
+    ''
+  );
+
+  if(expectedKey)cartridgeTopVoiceState.expectedKey=expectedKey;
+
   const now=Date.now();
-  if(now-Number(cartridgeTopVoiceState.requestedAt||0)<450)return;
+  if(
+    !force&&
+    now-Number(cartridgeTopVoiceState.requestedAt||0)<280
+  )return;
+
   cartridgeTopVoiceState.requestedAt=now;
 
-  bottomFrame?.contentWindow?.postMessage({
-    type:'HB_CARTRIDGE_COMMAND',
-    command:'requestCurrentVoice'
-  },'*');
+  if(readCurrentVoiceFromDirectBridge(expectedKey)){
+    return;
+  }
+
+  try{
+    bottomFrame?.contentWindow?.postMessage({
+      type:'HB_CARTRIDGE_COMMAND',
+      command:'requestCurrentVoice',
+      audioKey:expectedKey
+    },'*');
+  }catch(error){
+    console.warn('发送语音同步请求失败',error);
+  }
+
+  stopCartridgeVoiceSyncTimer();
+  cartridgeTopVoiceState.syncAttempts+=1;
+
+  if(cartridgeTopVoiceState.syncAttempts>=18){
+    markCartridgeVoiceSyncFailed(
+      expectedKey,
+      '语音同步失败，点击重试'
+    );
+    return;
+  }
+
+  cartridgeTopVoiceState.syncTimer=setTimeout(()=>{
+    if(
+      !cartridgeTopVoiceState.sourceReady||
+      (
+        expectedKey&&
+        cartridgeTopVoiceState.key!==expectedKey
+      )
+    ){
+      requestCurrentCartridgeVoice(expectedKey,true);
+    }
+  },380);
 }
 
 function showCartridgeVoiceWaiting(key,message='语音同步中…'){
-  const {audio,button,status}=cartridgeTopVoiceElements();
-  if(audio)audio.hidden=true;
-  if(button){
-    button.hidden=true;
-    button.dataset.voiceKey=key||'';
+  cartridgeTopVoiceState.expectedKey=String(key||'');
+  const {audio,mask,status}=cartridgeTopVoiceElements();
+  if(audio)audio.dataset.voiceKey=key||'';
+  if(mask){
+    mask.hidden=true;
+    mask.dataset.voiceKey=key||'';
   }
   if(status){
     status.hidden=false;
     status.textContent=message;
     status.dataset.voiceKey=key||'';
+    status.dataset.retryable='0';
+    status.title='';
   }
 }
 
 function showCartridgeNativeAudio(key){
-  const {audio,button,status}=cartridgeTopVoiceElements();
+  const {audio,mask,status}=cartridgeTopVoiceElements();
   if(status)status.hidden=true;
   if(audio){
-    audio.hidden=true;
+    audio.hidden=false;
     audio.dataset.voiceKey=key||'';
   }
-  if(button){
-    button.hidden=false;
-    button.dataset.voiceKey=key||'';
-    dsSetVoiceButtonVisual(
-      button,
-      audio&&!audio.paused?'playing':'ready'
-    );
+  if(mask){
+    mask.hidden=false;
+    mask.dataset.voiceKey=key||'';
   }
 }
 
@@ -2468,7 +2652,7 @@ function installCartridgeTopVoiceSource(key,voice={}){
 
   if(!dataUrl&&!blobUrl){
     showCartridgeVoiceWaiting(key,'语音重新同步中…');
-    requestCurrentCartridgeVoice();
+    requestCurrentCartridgeVoice(key,true);
     return false;
   }
 
@@ -2480,6 +2664,9 @@ function installCartridgeTopVoiceSource(key,voice={}){
   cartridgeTopVoiceState.sourceReady=true;
   cartridgeTopVoiceState.error='';
   cartridgeTopVoiceState.requestedAt=0;
+  cartridgeTopVoiceState.expectedKey=key;
+  cartridgeTopVoiceState.syncAttempts=0;
+  stopCartridgeVoiceSyncTimer();
 
   audio.preload='metadata';
   audio.playsInline=true;
@@ -2494,18 +2681,6 @@ function installCartridgeTopVoiceSource(key,voice={}){
     showCartridgeVoiceWaiting(key,'音频格式无法播放');
   };
 
-  audio.onplay=()=>{
-    const {button}=cartridgeTopVoiceElements();
-    if(button)dsSetVoiceButtonVisual(button,'playing');
-  };
-  audio.onpause=()=>{
-    const {button}=cartridgeTopVoiceElements();
-    if(button&&!audio.ended)dsSetVoiceButtonVisual(button,'ready');
-  };
-  audio.onended=()=>{
-    const {button}=cartridgeTopVoiceElements();
-    if(button)dsSetVoiceButtonVisual(button,'replay');
-  };
   audio.onloadedmetadata=()=>{
     showCartridgeNativeAudio(key);
   };
@@ -2528,7 +2703,7 @@ function applySnapshot(s){
   const select=topView.querySelector('.cartridge-route-select');
   const dialogue=topView.querySelector('.cartridge-top-dialogue');
   const voiceAudio=dialogue.querySelector('.cartridge-top-native-audio');
-  const voiceButton=dialogue.querySelector('.cartridge-top-speaker-btn');
+  const voiceMask=dialogue.querySelector('.cartridge-native-play-mask');
   const voiceStatus=dialogue.querySelector('.cartridge-top-voice-status');
 
   if(s.mode==='routeSelect'){
@@ -2537,12 +2712,11 @@ function applySnapshot(s){
     portrait.hidden=true;
     dialogue.classList.add('hidden');
     if(voiceAudio){
-      voiceAudio.hidden=true;
       voiceAudio.dataset.voiceKey='';
     }
-    if(voiceButton){
-      voiceButton.hidden=true;
-      voiceButton.dataset.voiceKey='';
+    if(voiceMask){
+      voiceMask.hidden=true;
+      voiceMask.dataset.voiceKey='';
     }
     if(voiceStatus)voiceStatus.hidden=true;
     renderRouteSelector(s);
@@ -2603,14 +2777,13 @@ function applySnapshot(s){
       });
     }else{
       showCartridgeVoiceWaiting(audioKey);
-      requestCurrentCartridgeVoice();
+      requestCurrentCartridgeVoice(audioKey,true);
     }
   }else{
     if(cartridgeTopVoiceState.key){
       clearCartridgeTopVoiceAudio();
     }else{
-      if(voiceAudio)voiceAudio.hidden=true;
-      if(voiceButton)voiceButton.hidden=true;
+      if(voiceMask)voiceMask.hidden=true;
       if(voiceStatus)voiceStatus.hidden=true;
     }
   }
@@ -2628,17 +2801,16 @@ function applyCartridgeVoiceReady(voice){
     return;
   }
 
-  const currentName=dialogue.querySelector('b')?.textContent||'';
-  const currentText=compactCartridgeDialogueText(
-    dialogue.querySelector('.text')?.textContent||''
+  const expectedKey=String(
+    cartridgeTopVoiceState.expectedKey||
+    status?.dataset?.voiceKey||
+    ''
   );
+  const incomingKey=String(voice.audioKey||'');
 
-  if(voice.name&&currentName&&voice.name!==currentName)return;
-  if(
-    voice.text&&
-    currentText&&
-    compactCartridgeDialogueText(voice.text)!==currentText
-  )return;
+  if(expectedKey&&incomingKey!==expectedKey){
+    return;
+  }
 
   audio.dataset.ttsProvider=voice.ttsProvider||'';
   audio.dataset.ttsDuration=String(Number(voice.ttsDuration||0));
@@ -2676,43 +2848,41 @@ async function openCard(html){
 
   const mirroredDialogue=topView.querySelector('.cartridge-top-dialogue');
   const mirroredNativeAudio=mirroredDialogue.querySelector('.cartridge-top-native-audio');
-  const mirroredSpeakerButton=mirroredDialogue.querySelector('.cartridge-top-speaker-btn');
+  const mirroredNativeMask=mirroredDialogue.querySelector('.cartridge-native-play-mask');
+  const mirroredVoiceStatus=mirroredDialogue.querySelector('.cartridge-top-voice-status');
   let topDialogueTouchAt=0;
 
-  mirroredSpeakerButton.addEventListener('click',e=>{
+  mirroredVoiceStatus.addEventListener('click',e=>{
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation?.();
 
-    const key=String(mirroredSpeakerButton.dataset.voiceKey||'');
-    if(
-      !key||
-      cartridgeTopVoiceState.key!==key||
-      !cartridgeTopVoiceState.sourceReady||
-      !mirroredNativeAudio.src
-    ){
-      notify('语音仍在同步，请稍等一下');
-      requestCurrentCartridgeVoice();
-      return;
-    }
+    const key=String(
+      mirroredVoiceStatus.dataset.voiceKey||
+      cartridgeTopVoiceState.expectedKey||
+      ''
+    );
 
-    if(mirroredNativeAudio.paused){
-      mirroredNativeAudio.muted=false;
-      mirroredNativeAudio.volume=1;
-      const promise=mirroredNativeAudio.play();
-      if(promise&&typeof promise.catch==='function'){
-        promise.catch(error=>{
-          dsSetVoiceButtonVisual(mirroredSpeakerButton,'replay');
-          notify('播放失败：'+friendlyError(error));
-        });
-      }
-    }else{
-      mirroredNativeAudio.pause();
-    }
+    cartridgeTopVoiceState.syncAttempts=0;
+    showCartridgeVoiceWaiting(key,'语音重新同步中…');
+    requestCurrentCartridgeVoice(key,true);
+  });
+
+  [
+    'pointerdown',
+    'pointerup',
+    'touchstart',
+    'touchend',
+    'click'
+  ].forEach(type=>{
+    mirroredNativeMask.addEventListener(type,e=>{
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+    },{passive:true});
   });
 
   const handleMirroredDialogue=e=>{
-    if(e.target.closest?.('.cartridge-top-speaker-btn'))return;
+    if(e.target.closest?.('.cartridge-native-play-mask'))return;
     if(e.target.closest?.('.cartridge-top-native-audio'))return;
     if(e.target.closest?.('.cartridge-top-voice-status'))return;
     if(e.type==='click'&&Date.now()-topDialogueTouchAt<650)return;
