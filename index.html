@@ -1164,65 +1164,155 @@ async function dsWaitAudioReady(audio,timeoutMs=9000){
 function dsJsonPath(obj,path){
   return String(path||'').split('.').filter(Boolean).reduce((v,k)=>v&&v[k],obj);
 }
-function dsMiniMaxEndpoints(cfg){
-  const out=[];
-  const add=url=>{if(url&&!out.includes(url))out.push(url)};
-  let custom=String(cfg.minimaxBaseUrl||'').trim().replace(/\/+$/,'');
-  if(custom)add(/\/v1\/t2a_v2$/i.test(custom)?custom:custom+'/v1/t2a_v2');
-  const group=String(cfg.minimaxGroupId||'').trim();
-  const version=cfg.minimaxVersion||'global';
-  if(version==='global'||version==='official'){
-    add('https://api.minimax.io/v1/t2a_v2');
-    add('https://api-uw.minimax.io/v1/t2a_v2');
-  }
-  if((version==='cn'||version==='official')&&group){
-    add('https://api.minimax.chat/v1/t2a_v2?GroupId='+encodeURIComponent(group));
-    add('https://api.minimaxi.com/v1/t2a_v2?GroupId='+encodeURIComponent(group));
-  }
-  if(version==='global'&&group)add('https://api.minimax.chat/v1/t2a_v2?GroupId='+encodeURIComponent(group));
-  if(version==='cn'&&!group)add('https://api.minimax.io/v1/t2a_v2');
-  if(!out.length)add('https://api.minimax.io/v1/t2a_v2');
-  return out;
+function dsNormalizeMiniMaxKey(value){
+  let key=String(value||'')
+    .replace(/[\u200B-\u200D\u2060\uFEFF]/g,'')
+    .trim();
+  key=key.replace(/^Authorization\s*:\s*/i,'').trim();
+  key=key.replace(/^(?:api[ _-]?key|token)\s*[:=]\s*/i,'').trim();
+  key=key.replace(/^Bearer\s+/i,'').trim();
+  key=key.replace(/^[\s"'“”‘’]+|[\s"'“”‘’]+$/g,'').trim();
+  return key;
 }
-async function dsCallMiniMax(text,cfg,voiceId){
-  const key=String(cfg.minimaxKey||'').replace(/^Bearer\s+/i,'').trim();
+function dsReadMonoMiniMaxConfig(){
+  try{
+    const mono=JSON.parse(localStorage.getItem('mono_tts_config')||'{}');
+    const key=dsNormalizeMiniMaxKey(mono.key||mono.minimaxKey||'');
+    if(!key)return null;
+    const rawVersion=String(mono.version||mono.minimaxVersion||'official').trim().toLowerCase();
+    return {
+      minimaxKey:key,
+      minimaxGroupId:String(mono.groupId||mono.minimaxGroupId||'').trim(),
+      minimaxVersion:rawVersion==='global'?'global':(rawVersion==='cn'?'cn':'official'),
+      minimaxModel:String(mono.model||mono.minimaxModel||'speech-02-hd').trim()||'speech-02-hd',
+      minimaxBaseUrl:'',
+      defaultVoiceId:String(mono.defaultVoiceId||'').trim()
+    };
+  }catch(_){return null}
+}
+function dsMiniMaxEndpoint(cfg){
+  const version=String(cfg.minimaxVersion||'official').trim().toLowerCase();
+  const group=String(cfg.minimaxGroupId||'').trim();
+  // 与成功的 Mono 网页保持一致：大陆/官方固定 api.minimax.chat，国际固定 api.minimax.io。
+  // 不再让旧的自定义 Base URL 覆盖版本选择。
+  const base=(version==='global')?'https://api.minimax.io':'https://api.minimax.chat';
+  return base+'/v1/t2a_v2'+(group?'?GroupId='+encodeURIComponent(group):'');
+}
+function dsMiniMaxMaskedKeyInfo(value){
+  const key=dsNormalizeMiniMaxKey(value);
+  if(!key)return'未填写';
+  if(key.length<=8)return'长度 '+key.length;
+  return key.slice(0,3)+'…'+key.slice(-3)+'（长度 '+key.length+'）';
+}
+function dsMiniMaxErrorMessage(response,data,raw){
+  const status=Number(data?.base_resp?.status_code??data?.base_resp?.statusCode??data?.status_code??0);
+  const detail=String(
+    data?.base_resp?.status_msg||data?.status_msg||data?.error?.message||data?.message||raw||''
+  ).slice(0,280);
+  if(/token\s*don'?t\s*match\s*group/i.test(detail)){
+    return 'API Key 与 Group ID 不属于同一个 MiniMax 大陆账号，请使用成功网页中同一组 API Key 和 Group ID。';
+  }
+  const httpMap={
+    401:'API Key 无效或已过期',402:'账户余额不足',403:'API Key 无权限',
+    429:'请求频率超限（RPM）',500:'MiniMax 服务器错误',503:'MiniMax 服务不可用'
+  };
+  const codeMap={
+    1000:'未知错误',1001:'请求超时',1002:'触发限流（RPM）',
+    1004:'API Key 无效（鉴权失败）',1039:'触发 TPM 限流',
+    1042:'非法字符超过 10%',2013:'输入参数格式错误'
+  };
+  if(!response.ok)return (httpMap[response.status]||('MiniMax HTTP '+response.status))+(detail?'：'+detail:'');
+  return (codeMap[status]||('错误码 '+status))+(detail?'：'+detail:'');
+}
+async function dsCallMiniMaxOnce(text,cfg,voiceId){
+  const key=dsNormalizeMiniMaxKey(cfg.minimaxKey||'');
   if(!key)throw new Error('MiniMax API Key 未配置');
+  const version=String(cfg.minimaxVersion||'official').trim().toLowerCase();
+  const group=String(cfg.minimaxGroupId||'').trim();
+  if(version!=='global'&&!group)throw new Error('MiniMax 大陆版必须填写 Group ID；请直接读取成功网页设置，或复制同一账号的 Group ID。');
   if(!voiceId)throw new Error('MiniMax Voice ID 未配置');
+  function dsResolvedTtsLanguage(cfg){
+    const raw=String(cfg?.language||'').trim().toLowerCase();
+    if(raw&&raw!=='auto')return raw;
+    return raw==='auto'?'':raw;
+  }
   const langMap={
-    zh:'Chinese','zh-cn':'Chinese','zh-tw':'Chinese',yue:'Yue Chinese',
-    en:'English',ja:'Japanese',ko:'Korean',fr:'French',de:'German',
-    es:'Spanish',ru:'Russian',pt:'Portuguese'
+    zh:'Chinese','zh-cn':'Chinese','zh-tw':'Chinese',mandarin:'Chinese',
+    yue:'Yue Chinese',cantonese:'Yue Chinese',
+    en:'English',english:'English',ja:'Japanese',japanese:'Japanese',
+    ko:'Korean',korean:'Korean',fr:'French',de:'German',es:'Spanish',
+    ar:'Arabic',ru:'Russian',pt:'Portuguese'
   };
   const body={
-    model:cfg.minimaxModel||'speech-02-hd',
-    text,stream:false,output_format:'hex',
-    language_boost:langMap[String(cfg.language||'').toLowerCase()]||'auto',
+    model:String(cfg.minimaxModel||'').trim()||'speech-02-hd',
+    text:String(text||'').trim(),
+    stream:false,
     voice_setting:{voice_id:voiceId,speed:Number(cfg.speed||1),vol:1,pitch:0},
     audio_setting:{sample_rate:32000,bitrate:128000,format:'mp3',channel:1}
   };
-  let last='';
-  for(const url of dsMiniMaxEndpoints(cfg)){
-    try{
-      const response=await dsFetchTimeout(url,{
-        method:'POST',
-        headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-        body:JSON.stringify(body)
-      });
-      const raw=await response.text();
-      let data;try{data=JSON.parse(raw)}catch(_){data={raw}}
-      const status=data?.base_resp?.status_code??data?.base_resp?.statusCode??data?.status_code??0;
-      if(!response.ok||status){
-        last=data?.base_resp?.status_msg||data?.status_msg||data?.error?.message||raw.slice(0,240)||('HTTP '+response.status);
-        continue;
-      }
-      const audio=data?.data?.audio??data?.audio;
-      if(!audio){last='MiniMax 没有返回 audio';continue}
-      return /^[0-9a-fA-F]+$/.test(String(audio).replace(/^0x/,''))?dsHexBlob(audio):dsBase64Blob(audio);
-    }catch(e){
-      last=e?.name==='AbortError'?'MiniMax 请求超时':String(e?.message||e);
-    }
+  const boost=langMap[String(dsResolvedTtsLanguage(cfg)||'').trim().toLowerCase()]||null;
+  if(boost)body.language_boost=boost;
+  if(!body.text)throw new Error('没有可合成的文字');
+
+  const url=dsMiniMaxEndpoint(cfg);
+  const response=await dsFetchTimeout(url,{
+    method:'POST',
+    headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify(body)
+  },25000);
+  const raw=await response.text();
+  let data;try{data=JSON.parse(raw)}catch(_){data={raw}}
+  const status=Number(data?.base_resp?.status_code??data?.base_resp?.statusCode??data?.status_code??0);
+  if(!response.ok||status){
+    const baseMessage=dsMiniMaxErrorMessage(response,data,raw);
+    const endpointLabel=(version==='global'?'国际':'大陆')+'｜'+url;
+    throw new Error(baseMessage+'｜实际请求：'+endpointLabel+'｜Key：'+dsMiniMaxMaskedKeyInfo(key));
   }
-  throw new Error(last||'MiniMax 语音生成失败');
+
+  const audio=data?.data?.audio??data?.audio;
+  if(audio){
+    const clean=String(audio).replace(/^0x/,'').replace(/\s/g,'');
+    return /^[0-9a-fA-F]+$/.test(clean)?dsHexBlob(clean):dsBase64Blob(audio);
+  }
+  const audioFile=data?.audio_file||data?.data?.audio_file;
+  if(audioFile){
+    const audioResponse=await dsFetchTimeout(String(audioFile),{},25000);
+    if(!audioResponse.ok)throw new Error('MiniMax 音频文件下载失败：HTTP '+audioResponse.status);
+    return audioResponse.blob();
+  }
+  throw new Error('MiniMax TTS 返回格式异常：没有 audio');
+}
+async function dsCallMiniMax(text,cfg,voiceId){
+  const noRetry=/余额|无权限|格式错误|非法字符/;
+  try{
+    return await dsCallMiniMaxOnce(text,cfg,voiceId);
+  }catch(firstError){
+    const firstMessage=String(firstError?.message||firstError);
+    const authFailure=/API Key|鉴权|无效|Group ID|token|401|403|1004/i.test(firstMessage);
+    const mono=authFailure?dsReadMonoMiniMaxConfig():null;
+    const currentKey=dsNormalizeMiniMaxKey(cfg.minimaxKey||'');
+    const canUseMono=!!(mono&&mono.minimaxKey&&(
+      mono.minimaxKey!==currentKey||
+      mono.minimaxGroupId!==String(cfg.minimaxGroupId||'').trim()||
+      mono.minimaxVersion!==String(cfg.minimaxVersion||'official').trim().toLowerCase()
+    ));
+    if(canUseMono){
+      const fallback={...cfg,...mono,minimaxBaseUrl:''};
+      try{
+        const blob=await dsCallMiniMaxOnce(text,fallback,voiceId);
+        const saved={...dsTtsConfig(),...fallback,provider:'minimax'};
+        state.settings.tts=saved;
+        dsSaveSharedTts(saved);
+        try{save()}catch(_){}
+        return blob;
+      }catch(secondError){
+        throw new Error(firstMessage+'｜已自动尝试成功网页保存的设置，但仍失败：'+String(secondError?.message||secondError));
+      }
+    }
+    if(noRetry.test(firstMessage)||authFailure)throw firstError;
+    await new Promise(resolve=>setTimeout(resolve,1500));
+    return dsCallMiniMaxOnce(text,cfg,voiceId);
+  }
 }
 async function dsCallElevenLabs(text,cfg,voiceId){
   const key=String(cfg.elevenKey||'').trim();
@@ -1649,10 +1739,11 @@ function dsTtsSettingsHtml(){
         </select></label>
         <label>模型<input id="ttsMiniModel" value="${esc(t.minimaxModel||'speech-02-hd')}"></label>
       </div>
-      <label>自定义 Base URL<input id="ttsMiniBase" value="${esc(t.minimaxBaseUrl||'')}" placeholder="可留空，自动使用官方接口"></label>
+      <input id="ttsMiniBase" type="hidden" value=""><p class="tts-note">接口地址已锁定为成功网页同一逻辑：大陆／官方使用 https://api.minimax.chat，国际使用 https://api.minimax.io；旧 Base URL 不会再覆盖。</p>
       <label>API Key<input id="ttsMiniKey" type="password" value="${esc(t.minimaxKey||'')}"></label>
-      <label>Group ID（大陆旧接口）<input id="ttsMiniGroup" value="${esc(t.minimaxGroupId||'')}"></label>
-      <p class="tts-note">七位攻略男主已经预置各自的 MiniMax Voice ID。</p>
+      <label>Group ID（大陆版）<input id="ttsMiniGroup" value="${esc(t.minimaxGroupId||'')}" placeholder="必须与上面的 API Key 属于同一账号"></label>
+      <p class="tts-note">角色语音已经预置各自的 MiniMax Voice ID，会随当前角色名字自动匹配；也可在下方“全局备用 Voice ID”里手动指定。</p>
+      <p class="tts-note">大陆版、国际版和官方模式不再交叉尝试不同域名；测试与实际剧情语音会使用完全相同的鉴权设置。</p>
     </div>
 
     <div class="tts-provider-panel" data-tts-provider="elevenlabs">
@@ -1707,6 +1798,7 @@ function dsTtsSettingsHtml(){
     <div class="row">
       <button class="pixel-btn primary nav-item" data-tts-action="save">保存语音设置</button>
       <button class="pixel-btn nav-item" data-tts-action="test">生成测试语音</button>
+      <button class="pixel-btn nav-item" data-tts-action="import-mono">读取成功网页设置</button>
     </div>
     <div id="ttsResult" class="muted"></div>
   </div>`;
@@ -1726,9 +1818,9 @@ function dsReadTtsForm(){
     speed:Number($('#ttsSpeed')?.value||1),
     language:$('#ttsLanguage')?.value.trim()||'auto',
     defaultVoiceId:$('#ttsDefaultVoice')?.value.trim()||'',
-    minimaxVersion:$('#ttsMiniVersion')?.value||'global',
-    minimaxBaseUrl:$('#ttsMiniBase')?.value.trim()||'',
-    minimaxKey:$('#ttsMiniKey')?.value.trim()||'',
+    minimaxVersion:$('#ttsMiniVersion')?.value||'official',
+    minimaxBaseUrl:'',
+    minimaxKey:dsNormalizeMiniMaxKey($('#ttsMiniKey')?.value||''),
     minimaxGroupId:$('#ttsMiniGroup')?.value.trim()||'',
     minimaxModel:$('#ttsMiniModel')?.value.trim()||'speech-02-hd',
     elevenBaseUrl:$('#ttsElevenBase')?.value.trim()||'https://api.elevenlabs.io',
@@ -1757,6 +1849,24 @@ function dsReadTtsForm(){
 }
 
 
+function dsImportMonoMiniMaxSettings(){
+  const mono=dsReadMonoMiniMaxConfig();
+  if(!mono){
+    notify('没有读取到成功网页保存的 MiniMax 设置；请先在成功网页保存一次语音设置，并确保两个网页在同一网站打开。');
+    const box=$('#ttsResult');
+    if(box)box.textContent='未找到 localStorage 里的 mono_tts_config。';
+    return;
+  }
+  const current=dsReadTtsForm();
+  const cfg={...current,...mono,provider:'minimax',minimaxBaseUrl:''};
+  state.settings.tts=cfg;
+  dsSaveSharedTts(cfg);
+  try{save()}catch(_){}
+  renderSettings();
+  const box=$('#ttsResult');
+  if(box)box.textContent='已读取成功网页设置｜版本 '+(cfg.minimaxVersion==='global'?'国际':'大陆')+'｜Group ID '+(cfg.minimaxGroupId?'已读取':'未读取')+'｜Key '+dsMiniMaxMaskedKeyInfo(cfg.minimaxKey);
+  notify('已读取成功网页的 MiniMax Key、Group ID、版本和模型');
+}
 function saveTtsSettings(){
   const cfg=dsReadTtsForm();
   state.settings.tts=cfg;
@@ -1779,7 +1889,8 @@ async function testTts(){
     const cfg=dsReadTtsForm();
     state.settings.tts=cfg;
     dsSaveSharedTts(cfg);
-    box.textContent='正在生成测试语音……';
+    const testUrl=dsMiniMaxEndpoint(cfg);
+    box.textContent='正在生成测试语音……\n实际请求：'+testUrl+'\nKey：'+dsMiniMaxMaskedKeyInfo(cfg.minimaxKey);
     const voice=await dsGenerateVerifiedVoice('“你好，这是角色语音接入测试。”',true);
     if(!voice?.audioKey||voice.browserDecoded!==true||!(Number(voice.ttsDuration)>0)){
       throw new Error('音频没有通过浏览器实际解码检查');
@@ -2083,6 +2194,7 @@ function onClick(e){const t=e.target.closest('button,[data-go],[data-act],[data-
   if(action==='play')dsPlayVerifiedVoice(t.dataset.voiceKey,t,t.dataset.ttsForce==='1').catch(err=>notify('播放失败：'+friendlyError(err)));
   else if(action==='save')saveTtsSettings();
   else if(action==='test')testTts();
+  else if(action==='import-mono')dsImportMonoMiniMaxSettings();
   return;
 }if(t.dataset.go){setPage(t.dataset.go);return}if(t.dataset.quick){sendTalk(t.dataset.quick);return}if(t.dataset.memoryTab){runtime.memoryTab=t.dataset.memoryTab;renderMemories();return}if(t.dataset.settingsTab){runtime.settingsTab=t.dataset.settingsTab;renderSettings();return}if(t.dataset.studioTab){saveVisualMeta();runtime.studioTab=t.dataset.studioTab;renderStudio();return}if(t.dataset.visualGenerate){const [kind,id]=t.dataset.visualGenerate.split(':');generateVisual(kind,id);return}if(t.dataset.visualUpload){const [kind,id]=t.dataset.visualUpload.split(':');runtime.assetTarget={kind,id};els.visualAssetFile.click();return}if(t.dataset.visualSelect){const [kind,id]=t.dataset.visualSelect.split(':');if(kind==='portrait')state.visuals.currentPortrait=id;else state.visuals.currentBackground=id;save(false);renderVisualLayers();renderStudio();return}if(t.dataset.visualClear){const [kind,id]=t.dataset.visualClear.split(':');clearVisual(kind,id);return}if(t.dataset.removeVisualReference){const idx=Number(t.dataset.removeVisualReference),key=state.visuals.referenceKeys[idx];assetDelete(key).catch(()=>{});state.visuals.referenceKeys.splice(idx,1);save(false);renderStudio();return}if(t.dataset.shell){state.settings.shell=t.dataset.shell;applyTheme();save(false);renderSettings();return}if(t.dataset.avatarPalette){state.character.avatarPalette=t.dataset.avatarPalette;applyTheme();save(false);runtime.page==='setup'?renderSetup():renderSettings();return}if(t.dataset.deleteMemory){state.memories=state.memories.filter(m=>m.id!==t.dataset.deleteMemory);save(false);renderMemories();return}const a=t.dataset.act;if(!a)return;({continue:continueGame,'new-game':newGame,import:()=>els.importFile.click(),'setup-next':setupNext,'setup-prev':()=>{runtime.setupStep=Math.max(1,runtime.setupStep-1);renderSetup()},'finish-setup':finishSetup,'edit-profile':openProfileEditor,'close-modal':()=>t.closest('.modal')?.remove(),'save-profile':()=>saveProfileEditor(t),'save-general':saveGeneral,'save-api':saveApiSettings,'test-api':testApi,'fetch-models':fetchModels,'save-visual-meta':saveVisualMeta,'save-visual-profile':saveVisualProfile,'save-visual-api':saveVisualApiSettings,'test-text-visual-api':testVisualTextApi,'test-image-visual-api':testVisualImageApi,'upload-visual-reference':()=>els.visualReferenceFile.click(),'clear-visual-references':async()=>{for(const k of state.visuals.referenceKeys)await assetDelete(k).catch(()=>{});state.visuals.referenceKeys=[];save(false);renderStudio();notify('已清空参考图')},'manual-save':()=>save(true),'export-save':exportSave,'reset-save':resetSave,'upload-avatar':()=>els.avatarFile.click(),'remove-avatar':()=>{state.character.avatarImage='';save(false);applyTheme();renderSettings()},'status':openStatusModal}[a]?.())}
 const UI_SELECTOR='button,[data-go],[data-act],[data-memory-tab],[data-settings-tab],[data-studio-tab],[data-visual-generate],[data-visual-upload],[data-visual-select],[data-visual-clear],[data-remove-visual-reference],[data-shell],[data-avatar-palette],[data-delete-memory],[data-quick]';
